@@ -32,3 +32,7 @@ repos:
       - id: black
         language_version: python3.10
         args: [--skip-string-normalization]
+  - repo: https://github.com/asottile/yesqa
+    rev: v1.3.0
+    hooks:
+    -   id: yesqa
