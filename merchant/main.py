@@ -3,10 +3,10 @@ from __future__ import annotations
 from argparse import ArgumentParser
 from argparse import Namespace
 
-from traders.commands.backtest import backtest_main
-from traders.commands.trade import trade_main
-from traders.commands.train import train_main
-from traders.config import get_config
+from merchant.commands.backtest import backtest_main
+from merchant.commands.trade import trade_main
+from merchant.commands.train import train_main
+from merchant.config import get_config
 
 
 def parser_args() -> Namespace:
