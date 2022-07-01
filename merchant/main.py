@@ -17,6 +17,7 @@ def parser_args() -> Namespace:
 def main() -> int:
     args = parser_args()
     config = get_config(args)  # noqa
+
     return 0
 
 
