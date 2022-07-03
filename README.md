@@ -2,4 +2,4 @@
 
 # merchant
 
-##### COMING SOON
+##### COMING SOON (still in very early pre prototyping phase)
