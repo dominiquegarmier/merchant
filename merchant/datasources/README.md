@@ -7,3 +7,4 @@
 | [iexcloud](https://iexcloud.io/)                     | stocks, etfs & crpyto | free & paid |
 | _default_ [yahoofinance](https://finance.yahoo.com/) | stocks, etfs & crpyto | free        |
 | [alphavantage](https://www.alphavantage.co/)         | stocks, etfs & crpyto | free & paid |
+| marketstore                                          | all OHLCV data        | local       |
