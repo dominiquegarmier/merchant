@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from merchant.datasources.base import DataSource
-from merchant.config import get_config
-from pathlib import Path
-import pandas as pd
 from datetime import datetime
-import pystore
+from pathlib import Path
+
 import dask.dataframe as dd
+import pandas as pd
+import pystore
 import yfinance as yf
 
+from merchant.config import get_config
+from merchant.datasources.base import DataSource
+
 COLUMN_NAMES = ('Date', 'Open', 'High', 'Low', 'Close', 'Volume')
-PYSTORE_NAME = "datastore"
+PYSTORE_NAME = 'datastore'
 COLLECTIONS = ('EOD',)
 
 
