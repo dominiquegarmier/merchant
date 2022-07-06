@@ -6,12 +6,15 @@ from pathlib import Path
 import pandas as pd
 from datetime import datetime
 import pystore
+import dask.dataframe as dd
 import yfinance as yf
+
+COLUMN_NAMES = ('Date', 'Open', 'High', 'Low', 'Close', 'Volume')
+PYSTORE_NAME = "datastore"
+COLLECTIONS = ('EOD',)
 
 
 class DataStore:
-    PYSTORE_NAME = "merchant.datasources.datastore"
-    COLUMN_NAMES = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
 
     _path: Path
     _store: pystore.store
@@ -21,43 +24,50 @@ class DataStore:
         if not self._path.exists():
             self._path.mkdir(parents=True)
         pystore.set_path(str(self._path))
-        self._store = pystore.store(self.PYSTORE_NAME)
+        self._store = pystore.store(PYSTORE_NAME)
 
     def query(
-        self, symbol: str, start: datetime | None = None, end: datetime | None = None
+        self,
+        col: str,
+        symbol: str,
+        start: datetime | None = None,
+        end: datetime | None = None,
     ) -> pd.DataFrame:
-        if start is None:
-            start = datetime(1, 1, 1)
+        if col not in COLLECTIONS:
+            raise ValueError(
+                f'{col} is not a valid collection, must be one of {COLLECTIONS}'
+            )
         if end is None:
             end = datetime.now()
-        raw_file_path = self._path / "OHLCV" / f"{symbol}.csv"
-        if not raw_file_path.exists():
-            empty = pd.DataFrame(columns=COLUMN_NAMES)
-            empty.index.name = INDEX_NAME
-            return empty
-        full_data = pd.read_csv(raw_file_path, index_col=INDEX_NAME)
-        print(full_data.index)
-        data = full_data[pd.Timestamp(start) <= full_data.index <= pd.Timestamp(end)]
-        data.index.name = INDEX_NAME
-        return data
 
-    def write(self, symbol: str, data: pd.DataFrame) -> None:
-        folder_path = self._path / "OHLCV"
-        if not folder_path.exists():
-            folder_path.mkdir(parents=True)
-        raw_file_path = folder_path / f"{symbol}.csv"
-        data = data[COLUMN_NAMES]
-        if raw_file_path.exists():
-            full_dataframe = pd.read_csv(
-                raw_file_path,
-                index_col=INDEX_NAME,
-                parse_dates=True,
+        collection = self._store.collection(col)
+        key = f'{symbol.upper()}'
+        if key in collection.list_items():
+            ddf = collection.item(key).data
+            cond = ddf.Date <= end
+            if start is not None:
+                cond &= ddf.Date >= start
+            return ddf[cond].compute()
+
+        raise ValueError(f'{symbol.upper()} not DataStore')
+
+    def write(self, col: str, symbol: str, data: pd.DataFrame) -> None:
+        if data.columns.to_list() != list(COLUMN_NAMES):
+            raise ValueError(f'{data} has invalid format, must be {COLUMN_NAMES}')
+        if col not in COLLECTIONS:
+            raise ValueError(
+                f'{col} is not a valid collection, must be one of {COLLECTIONS}'
             )
-            data = pd.concat([full_dataframe, data])
-            # TODO this doesn't work
-            data.index.drop_duplicates()
-            data.sort_index()
-        data.to_csv(raw_file_path, index_label=INDEX_NAME)
+
+        collection = self._store.collection(col)
+        key = f'{symbol.upper()}'
+        if key in collection.list_items():
+            ddf = collection.item(key).data
+            concat_ddf = dd.concat([ddf, data], axis=0).drop_duplicates(subset='Date')
+            concat_ddf = concat_ddf.sort_values(by='Date').reset_index(drop=True)
+            collection.write(key, concat_ddf, overwrite=True)
+        else:
+            collection.write(key, data)
 
 
 def download_symbols(symbols: list[str]) -> None:
@@ -70,41 +80,7 @@ def download_symbols(symbols: list[str]) -> None:
             symbol_data = data[symbol]
         else:
             symbol_data = data
-        symbol_data = symbol_data[COLUMN_NAMES].dropna()
-        ds.write(symbol, symbol_data)
 
-
-DOW_30_SYMBOLS = [
-    "AXP",
-    "AMGN",
-    "AAPL",
-    "BA",
-    "CAT",
-    "CSCO",
-    "CVX",
-    "GS",
-    "HD",
-    "HON",
-    "IBM",
-    "INTC",
-    "JNJ",
-    "KO",
-    "JPM",
-    "MCD",
-    "MMM",
-    "MRK",
-    "MSFT",
-    "NKE",
-    "PG",
-    "TRV",
-    "UNH",
-    "CRM",
-    "VZ",
-    "V",
-    "WBA",
-    "WMT",
-    "DIS",
-    "DOW",
-]
-
-download_symbols(['AXP'])
+        symbol_data.drop(columns=['Adj Close'], inplace=True)
+        symbol_data.reset_index(inplace=True)
+        ds.write('EOD', symbol, symbol_data)
