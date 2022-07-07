@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 DOW_30_SYMBOLS = [
     'AAPL',
     'AMGN',
