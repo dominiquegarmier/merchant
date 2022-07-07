@@ -47,9 +47,9 @@ class DataStore:
         key = f'{symbol.upper()}'
         if key in collection.list_items():
             # partition filtering
-            filters = [('Close', '<=', 1000)]
+            filters = [('Date', '<=', end)]
             if start is not None:
-                filters.append(('Close', '>=', 100))
+                filters.append(('Date', '>=', start))
             ddf = collection.item(key, filters=filters).data
 
             # fine grained filtering within the partition
@@ -110,5 +110,5 @@ def read_symbol() -> None:
     print(data)
 
 
-download_symbols(['AAPL'])
+# download_symbols(['AAPL'])
 read_symbol()
