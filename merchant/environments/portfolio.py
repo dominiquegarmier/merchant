@@ -6,6 +6,12 @@ from typing import Any
 
 import pandas as pd
 
+from merchant.datasources.base import DataSource
+
+
+class InvalidAction(Exception):
+    pass
+
 
 class Position:
     __instances__: dict[str, Position] = {}
@@ -18,7 +24,6 @@ class Position:
     # used for p&l calculation
     _buy_history: deque[tuple[float, float]]  # tuple[quantity, price]
     _history: pd.DataFrame
-    _open_date: datetime | None
 
     def __init__(self, symbol: str) -> None:
         self._symbol = symbol
@@ -30,18 +35,12 @@ class Position:
         self._buy_history = deque()
         self._total_profit = 0
 
-    def __new__(cls) -> Position:
-        '''only ever create on instance of Position per symbol'''
-        if cls._symbol not in cls.__instances__:
-            cls.__instances__[cls._symbol] = super().__new__(cls)
-        return cls.__instances__[cls._symbol]
-
-    def record_update(self, price: float, time: datetime) -> None:
+    def record_update(self, *, price: float, time: datetime) -> None:
         '''writes a new row to the history dataframe'''
         self._price = price
         self._history.loc[time] = [self._price, self._holding, self._profit]
 
-    def buy(self, price: float, quantity: float, time: datetime) -> None:
+    def buy(self, *, price: float, quantity: float, time: datetime) -> None:
         '''buy a given quantity of shares'''
         self._holding += quantity
         self.record_update(price=price, time=time)
@@ -49,8 +48,14 @@ class Position:
         # record for average price calculation
         self._buy_history.append((quantity, price))
 
-    def sell(self, price: float, quantity: float, time: datetime) -> None:
-        '''sell a given quantity of shares'''
+    def sell(self, *, price: float, quantity: float, time: datetime) -> None:
+        '''\
+        sell a given quantity of shares
+        raises an InvalidAction if there are not enough shares to sell
+        '''
+        if quantity > self._holding:
+            raise InvalidAction('not enough shares to sell')
+
         self._holding -= quantity
         # average price recording stuff
         initial_cost: float = 0
@@ -70,7 +75,7 @@ class Position:
         self._profit += price * quantity - initial_cost
         self.record_update(price=price, time=time)
 
-    def close(self, price: float, time: datetime) -> None:
+    def close(self, *, price: float, time: datetime) -> None:
         '''sell everything'''
         self.sell(price=price, quantity=self._holding, time=time)
 
@@ -120,4 +125,156 @@ class Position:
 
 
 class Portfolio:
-    positions: set[Position]
+    _done: bool | None = None
+
+    _start_data: datetime | None = None
+    _end_data: datetime | None = None
+
+    _value: float
+    _liquidity: float
+    _timestamp: datetime | None
+
+    _history: pd.DataFrame
+    _positions: dict[str, Position]
+
+    def __init__(self) -> None:
+        self._history = pd.DataFrame(
+            columns=['LIQUIDITY', 'VALUE'], index=pd.DatetimeIndex(name='DATE')
+        )
+        self._positions = {}
+        self._start_data = None
+        self._end_data = None
+
+    def start(self, time: datetime) -> None:
+        if self._done is not None:
+            raise ValueError('portfolio already started')
+        self._start_data = time
+        self._done = False
+        self.record_update(time=time, propagate=False)
+
+    def finish(self, time: datetime, market: MarketSimulation) -> None:
+        self._assert_running()
+        self._end_data = time
+        self._done = True
+        self.record_update(time=time, market=market)
+
+    def _porpagate_updates(self, *, market: MarketSimulation, time: datetime) -> None:
+        '''update the positions based on the market'''
+        for symbol, position in self._positions.items():
+            if not position.is_open and symbol in market:
+                position.record_update(price=market[symbol], time=time)
+
+    def _assert_done(self) -> None:
+        if self._done is None:
+            raise ValueError('portfolio not started')
+        if self._done is False:
+            raise ValueError('portfolio not finished')
+
+    def _assert_running(self) -> None:
+        if self._done is None:
+            raise ValueError('portfolio not started')
+        if self._done is True:
+            raise ValueError('portfolio already finished')
+
+    def _assert_started(self) -> None:
+        if self._done is None:
+            raise ValueError('portfolio not started')
+
+    def record_update(
+        self,
+        *,
+        time: datetime,
+        market: MarketSimulation | None = None,
+        propagate: bool = True,
+    ) -> None:
+        '''\
+        handle an update to the portfolio,
+        skips propagation if propagate is False or if market is None
+        '''
+        self._assert_running()
+
+        # update the positions based on the market
+        if market is not None and propagate:
+            self._porpagate_updates(market=market, time=time)
+
+        self._timestamp = time
+        self._value = sum(p.value for p in self._positions.values())
+        self._history.loc[time] = [self._liquidity, self._value]
+
+    def buy(
+        self, *, symbol: str, price: float, quantity: float, time: datetime
+    ) -> None:
+        '''buy a given quantity of shares'''
+        self._assert_running()
+        if self.liquidity < quantity * price:
+            raise InvalidAction('not enough liquidity')
+
+        if symbol not in self._positions:
+            self._positions[symbol] = Position(symbol=symbol)
+        position = self._positions[symbol]
+        position.buy(price=price, quantity=quantity, time=time)
+        self._liquidity -= price * quantity
+
+        self.record_update(time=time, propagate=False)
+
+    def sell(
+        self, *, symbol: str, price: float, quantity: float, time: datetime
+    ) -> None:
+        '''sell a given quantity of shares'''
+        self._assert_running()
+
+        if symbol not in self._positions:
+            raise InvalidAction('no position to sell')
+        position = self._positions[symbol]
+        position.sell(price=price, quantity=quantity, time=time)
+        self._liquidity += price * quantity
+
+        self.record_update(time=time, propagate=False)
+
+    @property
+    def liquidity(self) -> float:
+        self._assert_started()
+        return self._liquidity
+
+    @property
+    def value(self) -> float:
+        self._assert_started()
+        return self._value
+
+    @property
+    def is_done(self) -> bool:
+        return self._done is True
+
+    @property
+    def is_running(self) -> bool:
+        return self._done is False
+
+
+class MarketSimulation:
+    '''market simulation'''
+
+    _symbols: set[str]
+    _timestamp: datetime
+    _historic_data: pd.DataFrame
+
+    def __init__(self, historic_data: pd.DataFrame, start_date: datetime) -> None:
+        self._historic_data = historic_data
+        self._timestamp = start_date
+        self._symbols = set()
+
+    @property
+    def timestamp(self) -> datetime:
+        '''return current timestamp of market simulation'''
+        return self._timestamp
+
+    @timestamp.setter
+    def timestamp(self, value: datetime) -> None:
+        self._timestamp = value
+
+    def __getitem__(self, symbol: str) -> float:
+        '''get the price of a given symbol'''
+        raise NotImplementedError()
+
+    def __contains__(self, symbol: str) -> bool:
+        '''check if a given symbol is in the market environment'''
+        return symbol in self._symbols
