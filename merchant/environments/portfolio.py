@@ -7,6 +7,9 @@ from typing import Any
 import pandas as pd
 
 from merchant.datasources.base import DataSource
+from merchant.environments.market import MarketSimulation
+
+_DEFAULT_STARTING_CAPITAL = 10_000
 
 
 class InvalidAction(Exception):
@@ -124,26 +127,35 @@ class Position:
         return hash(self._symbol)
 
 
-class Portfolio:
-    _done: bool | None = None
+class PortfolioSimulation:
+    _done: bool | None
 
-    _start_data: datetime | None = None
-    _end_data: datetime | None = None
+    _start_data: datetime | None
+    _end_data: datetime | None
 
+    _timestamp: datetime | None
     _value: float
     _liquidity: float
-    _timestamp: datetime | None
 
     _history: pd.DataFrame
     _positions: dict[str, Position]
 
-    def __init__(self) -> None:
+    def __init__(self, *, starting_liquity: float | None = None) -> None:
         self._history = pd.DataFrame(
             columns=['LIQUIDITY', 'VALUE'], index=pd.DatetimeIndex(name='DATE')
         )
         self._positions = {}
+
+        # time stuff, will be set when start() is called
+        self._timestamp = None
         self._start_data = None
         self._end_data = None
+        self._done = None
+
+        if starting_liquity is None:
+            starting_liquity = _DEFAULT_STARTING_CAPITAL
+        self._liquidity = starting_liquity
+        self._value = self._liquidity
 
     def start(self, time: datetime) -> None:
         if self._done is not None:
@@ -191,21 +203,26 @@ class Portfolio:
         handle an update to the portfolio,
         skips propagation if propagate is False or if market is None
         '''
-        self._assert_running()
+        if self._done is not False:
+            raise ValueError('portfolio is not running')
+        assert self._start_data is not None
+        assert time > self._start_data
 
         # update the positions based on the market
         if market is not None and propagate:
             self._porpagate_updates(market=market, time=time)
 
         self._timestamp = time
-        self._value = sum(p.value for p in self._positions.values())
+        self._value = sum(p.value for p in self._positions.values()) + self._liquidity
         self._history.loc[time] = [self._liquidity, self._value]
 
     def buy(
         self, *, symbol: str, price: float, quantity: float, time: datetime
     ) -> None:
         '''buy a given quantity of shares'''
-        self._assert_running()
+        if self._done is not False:
+            raise ValueError('portfolio is not running')
+
         if self.liquidity < quantity * price:
             raise InvalidAction('not enough liquidity')
 
@@ -221,7 +238,9 @@ class Portfolio:
         self, *, symbol: str, price: float, quantity: float, time: datetime
     ) -> None:
         '''sell a given quantity of shares'''
-        self._assert_running()
+
+        if self._done is not False:
+            raise ValueError('portfolio is not running')
 
         if symbol not in self._positions:
             raise InvalidAction('no position to sell')
@@ -233,7 +252,6 @@ class Portfolio:
 
     @property
     def liquidity(self) -> float:
-        self._assert_started()
         return self._liquidity
 
     @property
@@ -248,33 +266,3 @@ class Portfolio:
     @property
     def is_running(self) -> bool:
         return self._done is False
-
-
-class MarketSimulation:
-    '''market simulation'''
-
-    _symbols: set[str]
-    _timestamp: datetime
-    _historic_data: pd.DataFrame
-
-    def __init__(self, historic_data: pd.DataFrame, start_date: datetime) -> None:
-        self._historic_data = historic_data
-        self._timestamp = start_date
-        self._symbols = set()
-
-    @property
-    def timestamp(self) -> datetime:
-        '''return current timestamp of market simulation'''
-        return self._timestamp
-
-    @timestamp.setter
-    def timestamp(self, value: datetime) -> None:
-        self._timestamp = value
-
-    def __getitem__(self, symbol: str) -> float:
-        '''get the price of a given symbol'''
-        raise NotImplementedError()
-
-    def __contains__(self, symbol: str) -> bool:
-        '''check if a given symbol is in the market environment'''
-        return symbol in self._symbols
