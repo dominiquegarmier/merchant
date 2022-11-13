@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from merchant.datasources.base import DataSource
+from merchant.dataset.base import DataSource
 from merchant.environments.market import MarketSimulation
 
 _DEFAULT_STARTING_CAPITAL = 10_000
