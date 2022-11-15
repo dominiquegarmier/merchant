@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-DOW_30_SYMBOLS = [
+__all__ = ['_DOW_30_TICKERS', '_NDX_100_TICKERS', '_SNP_500_TICKERS']
+
+_DOW_30_TICKERS = [
     'AAPL',
     'AMGN',
     'AXP',
@@ -32,7 +34,7 @@ DOW_30_SYMBOLS = [
     'WMT',
 ]
 
-NAS_100_SYMBOLS = [
+_NDX_100_TICKERS = [
     'AAPL',
     'ABNB',
     'ADBE',
@@ -137,7 +139,7 @@ NAS_100_SYMBOLS = [
     'ZS',
 ]
 
-SNP_500_SYMBOLS = [
+_SNP_500_TICKERS = [
     'A',
     'AAL',
     'AAP',

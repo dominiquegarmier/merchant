@@ -4,48 +4,74 @@ from datetime import datetime
 from typing import Any
 from typing import Literal
 from typing import NamedTuple
+from typing import Sequence
+from typing import TypeAlias
 
 import gym
-import pandas as pd
-from gym.spaces import MultiDiscrete
+import numpy as np
+import torch
+from gym.spaces import Box
+from ray.rllib.env.env_context import EnvContext
 
-from merchant.environments.market import MarketSimulation
 from merchant.environments.portfolio import PortfolioSimulation
+from merchant.market import HistoricalMarket
+from merchant.market import MarketOrder
+from merchant.utils.helpers import Ticker
 
 
-class Action(NamedTuple):
-    type: Literal['BUY', 'SELL']
-    symbol: str
-    quantity: int
-    price: float
+ObsType: TypeAlias = torch.Tensor
+ActType: TypeAlias = torch.Tensor
 
 
-class BaseMarketEnvironment(gym.Env):
-    _action_history: list[Action]
+class TradingEnvironment(gym.Env[ObsType, ActType]):
 
-    _portfolio_simulation: PortfolioSimulation
-    _market_simulation: MarketSimulation
+    action_space: Box
+    observation_space: Box
 
-    def __init__(self) -> None:
-        super().__init__()
+    _tickers: Sequence[Ticker]
+    _market_simulation: HistoricalMarket
 
-        self._action_history = []
+    def __init__(self, config: EnvContext) -> None:
+        self._tickers = config['tickers']
+        self._market_simulation = HistoricalMarket(
+            start=1, end=2, tickers=self._tickers
+        )
 
-        self._portfolio_simulation = PortfolioSimulation()
-        self._market_simulation = MarketSimulation()  # type: ignore
+        self.action_space = Box(low=-1, high=1, shape=(len(self._tickers),))
+        self.observation_space = Box(
+            low=0, high=np.inf, shape=(len(self._tickers), 1000, 5)
+        )
 
-        # start the market simulation
-        self._portfolio_simulation.start(datetime(2020, 1, 1))
-        self._market_simulation.start(datetime(2020, 1, 1))
+    def reset(
+        self, seed: int | None = None, options: dict | None = None
+    ) -> tuple[ObsType, dict]:
+        self._market_simulation.reset()
+        self._market_simulation.start()
 
-    def reset(self, seed=None) -> Any:
-        super().reset(seed=seed)
+        return self._get_observation(), {}
 
-        self._action_history = []
+    def step(self, action) -> tuple[ObsType, float, bool, bool, dict]:
+        orders = self._get_orders(action)
+        self._market_simulation.execute_orders(orders)
 
-        self._portfolio_simulation = PortfolioSimulation()
-        self._market_simulation = MarketSimulation()  # type: ignore
+        done = not self._market_simulation.step()
+        return self._get_observation(), 0, False, done, {}
 
-        # start the market simulation
-        self._portfolio_simulation.start(datetime(2020, 1, 1))
-        self._market_simulation.start(datetime(2020, 1, 1))
+    def _get_observation(self) -> ObsType:
+        if not self._market_simulation.is_running:
+            raise RuntimeError('simulation not running')
+        return self.observation_space.sample()
+
+    def _get_orders(self, action: ActType) -> Sequence[MarketOrder]:
+        EPSILON = 0.1
+        ret: list[MarketOrder] = []
+
+        for index, ticker in enumerate(self._tickers):
+            if abs(action[index]) > EPSILON:
+                ord = MarketOrder(
+                    ticker=ticker,
+                    quantity=action[index],  # TODO: scale quantity
+                    type='BUY' if action[index] > 0 else 'SELL',
+                )
+                ret.append(ord)
+        return ret

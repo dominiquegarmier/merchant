@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from merchant.utils.tickers import _DOW_30_TICKERS
+from merchant.utils.tickers import _NDX_100_TICKERS
+from merchant.utils.tickers import _SNP_500_TICKERS
+
+__all__ = ['NDX_100', 'SNP_500', 'DOW_30', 'Ticker']
+
 
 class Ticker:
     _ticker: str
     _exchange: str
-
     _instances: dict[tuple[str, str], Ticker] = {}
 
     def __init__(self, ticker: str, exchange: str) -> None:
@@ -37,3 +42,8 @@ class Ticker:
     @property
     def exchange(self) -> str:
         return self._exchange
+
+
+NDX_100: list[Ticker] = [Ticker(ticker, 'NASDAQ') for ticker in _NDX_100_TICKERS]
+SNP_500: list[Ticker] = [Ticker(ticker, 'NYSE') for ticker in _SNP_500_TICKERS]
+DOW_30: list[Ticker] = [Ticker(ticker, 'NYSE') for ticker in _DOW_30_TICKERS]
