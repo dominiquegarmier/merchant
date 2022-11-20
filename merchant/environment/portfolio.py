@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 
 from merchant.data.tickers import CASH
 from merchant.data.tickers import Ticker
-from merchant.market import HistoricalMarket
+from merchant.environment.market import HistoricalMarket
 
 
 class Position:

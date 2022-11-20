@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 from typing import Literal
 from typing import NamedTuple
+from typing import Sequence
 from typing import TypeAlias
 
 import gym
@@ -14,8 +14,8 @@ from gym.spaces import Box
 from ray.rllib.env.env_context import EnvContext
 
 from merchant.data.tickers import Ticker
-from merchant.market import HistoricalMarket
-from merchant.market import MarketOrder
+from merchant.environment.market import HistoricalMarket
+from merchant.environment.market import MarketOrder
 
 
 ObsType: TypeAlias = np.ndarray
