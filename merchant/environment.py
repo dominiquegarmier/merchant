@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from typing import Literal
 from typing import NamedTuple
-from typing import Sequence
+from collections.abc import Sequence
 from typing import TypeAlias
 
 import gym

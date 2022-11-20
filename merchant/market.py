@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Literal
-from typing import Sequence
+from collections.abc import Sequence
 
 import pandas as pd
 
