@@ -1,18 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
 from pathlib import Path
-from typing import Iterator
 from typing import Literal
-from typing import Sequence
 from typing import TypeAlias
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
 from polygon import RESTClient
+from urllib3 import HTTPResponse
 
 from merchant.data.tickers import Ticker
 
@@ -59,7 +60,18 @@ def _get_agg_interval(
         adjusted=True,
     )
 
-    return pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
+    if isinstance(resp, HTTPResponse):
+        raise RuntimeError(f'HTTP Error: {resp.status}')
+
+    ret = pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
+    for agg in resp:
+        ret.loc[agg.timestamp * 1_000_000] = [
+            agg.open,
+            agg.high,
+            agg.low,
+            agg.close,
+            agg.volume,
+        ]  # convert ms timestamp to ns
 
 
 def _normalize_data(data: pd.DataFrame) -> pa.Table:
