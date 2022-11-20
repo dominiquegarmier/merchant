@@ -14,8 +14,8 @@ from gym.spaces import Box
 from ray.rllib.env.env_context import EnvContext
 
 from merchant.data.tickers import Ticker
-from merchant.market import HistoricalMarket
-from merchant.market import MarketOrder
+from merchant.environment.market import HistoricalMarket
+from merchant.environment.market import MarketOrder
 
 
 ObsType: TypeAlias = np.ndarray
