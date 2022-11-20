@@ -3,31 +3,31 @@ from __future__ import annotations
 import pandas as pd
 import plotly.graph_objects as go
 
-from merchant.dataset.datasource import Dataset
-from merchant.utils.helpers import Ticker
-
-CASH: Ticker = Ticker(ticker='$USD', exchange='__CASH__')
-
-
-def bind_datasource(dataset: Dataset) -> None:
-    Portfolio.Meta.datasource = dataset
+from merchant.data.tickers import CASH
+from merchant.data.tickers import Ticker
+from merchant.market import HistoricalMarket
 
 
 class Position:
+    _market: HistoricalMarket | None
+
     ticker: Ticker
     quantity: float
-
     history: pd.DataFrame
 
-    _datasource: Dataset | None
-
     def __init__(
-        self, ticker: Ticker, quantity: float, datasource: Dataset | None
+        self,
+        ticker: Ticker,
+        quantity: float,
+        market: HistoricalMarket | None,
+        *,
+        _require_market: bool = True,
     ) -> None:
         self.ticker = ticker
         self.quantity = quantity
 
-        self._datasource = datasource
+        if _require_market and market is None:
+            raise ValueError('market must be provided')
 
         self.history = pd.DataFrame(
             columns=['quantity', 'unit_price'], index=pd.DatetimeIndex([])
@@ -38,20 +38,31 @@ class Position:
 
     @property
     def value(self) -> float:
+        if self._market is None:
+            raise ValueError('market not set')
         raise NotImplementedError
+
+
+class CashPosition(Position):
+    def __init__(self, quantity: float) -> None:
+        super().__init__(CASH, quantity, None, _require_market=False)
+
+    @property
+    def value(self) -> float:
+        return self.quantity
 
 
 class Positions:
     _positions: dict[Ticker, Position] = {}
-    _datasource: Dataset
+    _market: HistoricalMarket
 
-    def __init__(self, datasource: Dataset) -> None:
-        self._datasource = datasource
+    def __init__(self, market: HistoricalMarket) -> None:
+        self._market = market
 
     def __getitem__(self, ticker: Ticker) -> Position:
         if ticker not in self._positions:
             self._positions[ticker] = Position(
-                ticker=ticker, quantity=0, datasource=self._datasource
+                ticker=ticker, quantity=0, market=self._market
             )
         return self._positions[ticker]
 
@@ -60,31 +71,22 @@ class Positions:
         return sum(position.value for position in self._positions.values())
 
 
-class CashPosition(Position):
-    def __init__(self, quantity: float) -> None:
-        super().__init__(CASH, quantity, None)
-
-    @property
-    def value(self) -> float:
-        return self.quantity
-
-
 class Portfolio:
-    class Meta:
-        datasource: Dataset
-        timekeeper: None
+    _market: HistoricalMarket
 
     _cash: CashPosition
     _positions: Positions
 
     _start_cash: float
     _history: pd.DataFrame  # value history
+    _step_size: int = 1
 
-    def __init__(self, start_cash: float) -> None:
+    def __init__(self, start_cash: float, market: HistoricalMarket) -> None:
         self._start_cash = start_cash
+        self._market = market
         self._cash = CashPosition(quantity=start_cash)
 
-        self._positions = Positions(datasource=self.Meta.datasource)
+        self._positions = Positions(market=self._market)
         self._history = pd.DataFrame(columns=['open', 'high', 'low', 'close'])
 
     @property
@@ -107,7 +109,11 @@ class Portfolio:
 
     @property
     def volatility(self) -> float:
-        raise NotImplementedError
+        '''
+        returns:
+            float: unormalized volatility
+        '''
+        return self._history['close'].pct_change().std()  # type: ignore
 
     @property
     def cagr(self) -> float:
@@ -135,7 +141,10 @@ class Portfolio:
 
     @property
     def max_drawdown_ratio(self) -> float:
-        raise NotImplementedError
+        cum_max = self._history['high'].cummax()
+        drawdown = cum_max - self._history.low
+        drawdown_ratio = drawdown / cum_max
+        return 1 - drawdown_ratio.max()  # type: ignore
 
     def __repr__(self) -> str:
         return 'Portfolio: ...'

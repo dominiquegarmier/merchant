@@ -1,35 +1,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 from functools import cached_property
-from typing import Callable
+from typing import Literal
 from typing import Sequence
-from typing import Type
-from typing import TypeAlias
 
 import pandas as pd
 
-from merchant.dataset import DataSource
-
-
-Ticker: TypeAlias = str
-
-
-class MarketOrderType(Enum):
-    BUY = 'BUY'
-    SELL = 'SELL'
+from merchant.data.dataset import Dataset
+from merchant.data.tickers import Ticker
 
 
 @dataclass
 class MarketOrder:
     ticker: Ticker
     quantity: float
-    type: MarketOrderType
+    limit: float
+    type: Literal['BUY', 'SELL']
 
 
-class MarketInterface:
-    pass
+@dataclass
+class MarketOrderExecution:
+    order: MarketOrder
+    success: bool
+    price: float | None
+    quantity: float | None
 
 
 class MarketError(Exception):
@@ -40,53 +35,81 @@ class SimulationNotRunning(MarketError):
     ...
 
 
-class SimulationAlreadyRunning(MarketError):
+class SimulationRunning(MarketError):
     ...
 
 
-class HistoricalMarket(MarketInterface):
-    is_running: bool = False
+class HistoricalMarket:
+    _is_running: bool = False
+
+    _start: int
+    _end: int
+    _step: int
+    _timestamp: int
 
     def __init__(
         self,
         start: int,
         end: int,
+        step: int,
         tickers: Sequence[Ticker],
-        datasource: type[DataSource] = DataSource,
+        dataset: type[Dataset] = Dataset,
     ) -> None:
         super().__init__()
-        self._dataset = datasource()
+        self._dataset = dataset(tickers=tickers)
+
+        self._start = start
+        self._end = end
+        self._step = step
+
+        self._timestamp = start
 
     @cached_property
     def tickers(self) -> list[Ticker]:
         return []
 
-    def get_quote(self, ticker: Ticker) -> float:
-        ...
+    @property
+    def is_running(self) -> bool:
+        return self._is_running
 
-    def post_order(self, order: MarketOrder) -> bool:
-        return False
-
-    def step(self, timedelta: int | pd.Timedelta) -> None:
-        if not self.is_running:
-            raise SimulationNotRunning
-        if isinstance(timedelta, int):
-            timedelta = pd.Timedelta(timedelta, unit='D')
-        self._timestamp += timedelta
+    @property
+    def timestamp(self) -> int:
+        '''
+        returns:
+            int: timestamp in nanoseconds of the current simulation step
+        '''
+        return self._timestamp
 
     def start(self) -> None:
-        if self.is_running:
-            raise SimulationAlreadyRunning
-        self.is_running = True
+        if self._is_running:
+            raise SimulationRunning
+        self._is_running = True
 
     def stop(self) -> None:
         if not self.is_running:
             raise SimulationNotRunning
-        self.is_running = False
+        self._is_running = False
 
-    def __enter__(self) -> HistoricalMarket:
-        self.start()
-        return self
+    def reset(self) -> None:
+        if self._is_running:
+            raise SimulationRunning
+        self._timestamp = self._start
 
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
-        self.stop()
+    def step(self) -> bool:
+        self._timestamp += self._step
+        return self._timestamp < self._end
+
+    def get_quotes(self, tickers: Sequence[Ticker]) -> pd.DataFrame:
+        raise NotImplementedError
+
+    def _exectue_order(self, ord: MarketOrder) -> MarketOrderExecution:
+        raise NotImplementedError
+
+    def execute_orders(self, ords: Sequence[MarketOrder]) -> list[MarketOrderExecution]:
+        '''
+        execute a sequence of market orders
+
+        sell orders are executed at or above the limit price
+        buy orders are executed at or below the limit price
+        '''
+        return [self._exectue_order(ord) for ord in ords]
