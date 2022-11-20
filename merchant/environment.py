@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 from typing import Literal
 from typing import NamedTuple
-from collections.abc import Sequence
 from typing import TypeAlias
 
 import gym

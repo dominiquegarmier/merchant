@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Literal
-from collections.abc import Sequence
 
 import pandas as pd
 
