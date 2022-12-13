@@ -16,6 +16,7 @@ from ray.rllib.env.env_context import EnvContext
 from merchant.data.tickers import Ticker
 from merchant.environment.market import HistoricalMarket
 from merchant.environment.market import MarketOrder
+from merchant.environment.portfolio import Portfolio
 
 
 ObsType: TypeAlias = np.ndarray
@@ -29,14 +30,18 @@ class TradingEnvironment(gym.Env[ObsType, ActType]):
 
     _tickers: Sequence[Ticker]
     _market_simulation: HistoricalMarket
+    _portfolio_simulation: Portfolio
 
     def __init__(self, config: EnvContext) -> None:
         self._tickers = config['tickers']
         self._market_simulation = HistoricalMarket(
             start=1, end=2, step=1, tickers=self._tickers
         )
+        self._portfolio_simulation = Portfolio(
+            start_cash=config['start_cash'], market=self._market_simulation
+        )
 
-        self.action_space = Box(low=-1, high=1, shape=(len(self._tickers),))
+        self.action_space = Box(low=0, high=np.inf, shape=(len(self._tickers),))
         self.observation_space = Box(
             low=0, high=np.inf, shape=(len(self._tickers), 1000, 5)
         )
@@ -52,29 +57,42 @@ class TradingEnvironment(gym.Env[ObsType, ActType]):
 
         return self._get_observation(), {}
 
-    def step(self, action) -> tuple[ObsType, float, bool, dict]:
-        orders = self._get_orders(action)
-        self._market_simulation.execute_orders(orders)
+    def step(self, action: ActType) -> tuple[ObsType, float, bool, dict]:
+        try:
+            sell_action = 1 - np.maximum(action, 1)  # value in [0, 1]
+            self._exectue_sell_side(action=sell_action)
+
+            buy_action = np.minimum(action, 1) - 1  # value between in [0, inf)
+            buy_action = self._check_adj_buy_side(action=buy_action)
+            self._exectue_buy_side(action=buy_action)
+        except Exception:  # TODO catch market order exception
+            raise
 
         done = not self._market_simulation.step()
         return self._get_observation(), 0, done, {}
 
     def _get_observation(self) -> ObsType:
-        if not self._market_simulation.is_running:
-            raise RuntimeError('simulation not running')
-        return self.observation_space.sample()
+        raise NotImplementedError
 
-    def _get_orders(self, action: ActType) -> Sequence[MarketOrder]:
-        EPSILON = 0.1
-        ret: list[MarketOrder] = []
+    def _exectue_sell_side(self, action: ActType) -> None:
+        orders: list[MarketOrder] = []
+        for stock_idx, signal in enumerate(action):
+            if signal == 0:
+                continue
+            ticker = self._tickers[stock_idx]
+            position = self._portfolio_simulation[ticker]
+            if position.quantity == 0:
+                continue
 
-        for index, ticker in enumerate(self._tickers):
-            if abs(action[index]) > EPSILON:
-                ord = MarketOrder(
-                    ticker=ticker,
-                    limit=0,
-                    quantity=action[index],  # TODO: scale quantity
-                    type='BUY' if action[index] > 0 else 'SELL',
-                )
-                ret.append(ord)
-        return ret
+            sell_amount = int(signal * position.quantity)
+            order = MarketOrder(ticker=ticker, quantity=sell_amount, type='SELL')
+            orders.append(order)
+
+        excs = self._market_simulation.execute_orders(ords=orders)  # noqa
+        return None
+
+    def _check_adj_buy_side(self, action: ActType) -> ActType:
+        return action
+
+    def _exectue_buy_side(self, action: ActType) -> None:
+        return None

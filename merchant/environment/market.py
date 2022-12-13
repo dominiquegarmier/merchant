@@ -15,8 +15,8 @@ from merchant.data.tickers import Ticker
 class MarketOrder:
     ticker: Ticker
     quantity: float
-    limit: float
     type: Literal['BUY', 'SELL']
+    limit: float | None = None
 
 
 @dataclass
