@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
+from logging import getLogger
 from typing import Any
 from typing import Literal
 from typing import NamedTuple
+from typing import TYPE_CHECKING
 from typing import TypeAlias
 
 import gym
@@ -16,8 +18,10 @@ from ray.rllib.env.env_context import EnvContext
 from merchant.data.tickers import Ticker
 from merchant.environment.market import HistoricalMarket
 from merchant.environment.market import MarketOrder
+from merchant.environment.market import MarketOrderExecution
 from merchant.environment.portfolio import Portfolio
 
+logger = getLogger(__name__)
 
 ObsType: TypeAlias = np.ndarray
 ActType: TypeAlias = np.ndarray
@@ -60,11 +64,10 @@ class TradingEnvironment(gym.Env[ObsType, ActType]):
     def step(self, action: ActType) -> tuple[ObsType, float, bool, dict]:
         try:
             sell_action = 1 - np.maximum(action, 1)  # value in [0, 1]
-            self._exectue_sell_side(action=sell_action)
+            sell_excs = self._exectue_sell_side(action=sell_action)
 
             buy_action = np.minimum(action, 1) - 1  # value between in [0, inf)
-            buy_action = self._check_adj_buy_side(action=buy_action)
-            self._exectue_buy_side(action=buy_action)
+            buy_excs = self._exectue_buy_side(action=buy_action)
         except Exception:  # TODO catch market order exception
             raise
 
@@ -72,9 +75,17 @@ class TradingEnvironment(gym.Env[ObsType, ActType]):
         return self._get_observation(), 0, done, {}
 
     def _get_observation(self) -> ObsType:
+        '''Observation contains:
+
+        - 1. OHLCV over some time period
+        - 2. Portfolio information
+            - i. Cash
+            - ii. Value
+            - iii. Positions
+        '''
         raise NotImplementedError
 
-    def _exectue_sell_side(self, action: ActType) -> None:
+    def _exectue_sell_side(self, action: ActType) -> list[MarketOrderExecution]:
         orders: list[MarketOrder] = []
         for stock_idx, signal in enumerate(action):
             if signal == 0:
@@ -88,11 +99,40 @@ class TradingEnvironment(gym.Env[ObsType, ActType]):
             order = MarketOrder(ticker=ticker, quantity=sell_amount, type='SELL')
             orders.append(order)
 
-        excs = self._market_simulation.execute_orders(ords=orders)  # noqa
-        return None
+        return self._market_simulation.execute_orders(ords=orders)
 
-    def _check_adj_buy_side(self, action: ActType) -> ActType:
-        return action
+    def _exectue_buy_side(self, action: ActType) -> list[MarketOrderExecution]:
+        orders: list[MarketOrder] = []
+        total_cost = 0.0
 
-    def _exectue_buy_side(self, action: ActType) -> None:
-        return None
+        for stock_idx, signal in enumerate(action):
+            if signal == 0:
+                continue
+            ticker = self._tickers[stock_idx]
+            unit_price = self._market_simulation[ticker]
+            amount = int(signal * self._portfolio_simulation[ticker].quantity)
+            total_cost += unit_price * amount
+
+        if total_cost > self._portfolio_simulation.cash:
+            adj_ratio = self._portfolio_simulation.cash / total_cost
+            for order in orders:
+                order.quantity = int(order.quantity * adj_ratio)
+
+        return self._market_simulation.execute_orders(ords=orders)
+
+    def _update_portfolio(self, executions: list[MarketOrderExecution]) -> None:
+        for exc in executions:
+            if not exc.success:
+                logger.debug(f'order failed: {exc.order}')
+                continue
+
+            if TYPE_CHECKING:
+                assert exc.price is not None
+                assert exc.quantity is not None
+
+            self._portfolio_simulation.perform_action(
+                action=exc.order.type,
+                ticker=exc.order.ticker,
+                quantity=exc.quantity,
+                price=exc.price,
+            )

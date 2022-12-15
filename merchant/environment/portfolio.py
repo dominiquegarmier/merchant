@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from typing import Generic
+from typing import Literal
+from typing import overload
+from typing import TypeVar
+
 import pandas as pd
 import plotly.graph_objects as go
-from typing import TypeVar, Generic
 
 from merchant.data.tickers import CASH
 from merchant.data.tickers import Ticker
@@ -76,7 +80,7 @@ class Positions:
     def __init__(self, market: HistoricalMarket) -> None:
         self._market = market
 
-    def __getitem__(self, ticker: Ticker) -> Position:
+    def __getitem__(self, ticker: Ticker) -> Position[int]:
         if ticker not in self._positions:
             self._positions[ticker] = Position(
                 ticker=ticker, quantity=0, market=self._market
@@ -106,7 +110,7 @@ class Portfolio:
         self._positions = Positions(market=self._market)
         self._history = pd.DataFrame(columns=['open', 'high', 'low', 'close'])
 
-    def __getitem__(self, ticker: Ticker) -> Position:
+    def __getitem__(self, ticker: Ticker) -> Position[int]:
         return self._positions[ticker]
 
     @property
@@ -114,12 +118,42 @@ class Portfolio:
         return self._cash.value + self._positions.value
 
     @property
-    def cash_value(self) -> float:
+    def cash(self) -> float:
         return self._cash.value
 
     @property
     def positions_value(self) -> float:
         return self._positions.value
+
+    def perform_action(
+        self,
+        /,
+        *,
+        action: Literal['BUY', 'SELL'],
+        ticker: Ticker,
+        quantity: int,
+        price: float,
+    ) -> None:
+        if action == 'BUY':
+            self.buy(ticker=ticker, quantity=quantity, price=price)
+        elif action == 'SELL':
+            self.sell(ticker=ticker, quantity=quantity, price=price)
+        else:
+            raise ValueError(f'invalid action: {action}')
+
+    def buy(self, /, *, ticker: Ticker, quantity: int, price: float) -> None:
+        if self._cash.value < price * quantity:
+            raise ValueError('not enough cash')
+
+        self._cash.quantity -= price * quantity
+        self._positions[ticker].quantity += quantity
+
+    def sell(self, /, *, ticker: Ticker, quantity: int, price: float) -> None:
+        if self._positions[ticker].quantity < quantity:
+            raise ValueError('not enough quantity')
+
+        self._cash.quantity += price * quantity
+        self._positions[ticker].quantity -= quantity
 
     @property
     def pl_ratio(self) -> float | None:
