@@ -98,7 +98,7 @@ class TradingEnvironment(gym.Env[ObsType, ActType]):
             order = MarketOrder(ticker=ticker, quantity=sell_amount, type='SELL')
             orders.append(order)
 
-        return self._market_simulation.execute_orders(ords=orders)
+        return self._market_simulation.execute_orders(ords=orders)  # type: ignore
 
     def _exectue_buy_side(self, action: ActType) -> list[MarketOrderExecution]:
         orders: list[MarketOrder] = []
@@ -117,7 +117,7 @@ class TradingEnvironment(gym.Env[ObsType, ActType]):
             for order in orders:
                 order.quantity = int(order.quantity * adj_ratio)
 
-        return self._market_simulation.execute_orders(ords=orders)
+        return self._market_simulation.execute_orders(ords=orders)  # type: ignore
 
     def _update_portfolio(self, executions: list[MarketOrderExecution]) -> None:
         for exc in executions:
