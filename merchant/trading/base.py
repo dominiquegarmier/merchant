@@ -3,15 +3,16 @@ from __future__ import annotations
 from abc import ABCMeta
 from abc import abstractmethod
 from abc import abstractproperty
+from typing import Generic
 from typing import TypeVar
 
 
-Time = int
+T = TypeVar('T')
 
 
-class InternalClockMeta(metaclass=ABCMeta):
+class InternalClockMeta(Generic[T], metaclass=ABCMeta):
     @abstractproperty
-    def time(self) -> Time:
+    def time(self) -> T:
         ...
 
     @abstractmethod
@@ -23,11 +24,11 @@ class InternalClockMeta(metaclass=ABCMeta):
         ...
 
 
-class HasInternalClock(metaclass=ABCMeta):
-    _clock: InternalClockMeta
+class HasInternalClock(Generic[T], metaclass=ABCMeta):
+    _clock: InternalClockMeta[T]
 
     @property
-    def time(self) -> Time:
+    def time(self) -> T:
         return self._clock.time
 
     def reset(self) -> None:

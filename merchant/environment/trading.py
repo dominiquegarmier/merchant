@@ -39,7 +39,7 @@ class TradingEnvironment(gym.Env[ObsType, ActType]):
     def __init__(self, config: EnvContext) -> None:
         self._tickers = config['tickers']
         self._market_simulation = HistoricalMarket(
-            start=1, end=2, step=1, tickers=self._tickers
+            start=1, end=2, tickers=self._tickers
         )
         self._portfolio_simulation = Portfolio(
             start_cash=config['start_cash'], market=self._market_simulation
@@ -57,17 +57,16 @@ class TradingEnvironment(gym.Env[ObsType, ActType]):
         options: dict | None = None,
     ) -> tuple[ObsType, dict]:
         self._market_simulation.reset()
-        self._market_simulation.start()
 
         return self._get_observation(), {}
 
     def step(self, action: ActType) -> tuple[ObsType, float, bool, dict]:
         try:
             sell_action = 1 - np.maximum(action, 1)  # value in [0, 1]
-            sell_excs = self._exectue_sell_side(action=sell_action)
+            sell_excs = self._exectue_sell_side(action=sell_action)  # noqa
 
             buy_action = np.minimum(action, 1) - 1  # value between in [0, inf)
-            buy_excs = self._exectue_buy_side(action=buy_action)
+            buy_excs = self._exectue_buy_side(action=buy_action)  # noqa
         except Exception:  # TODO catch market order exception
             raise
 

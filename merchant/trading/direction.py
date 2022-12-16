@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from merchant.trading.dataclasses.instrument import Instrument
-from merchant.trading.dataclasses.pair import TradingPair
+from merchant.trading.instrument import Instrument
+from merchant.trading.pair import TradingPair
 
 
 class TradingDirection:
@@ -28,6 +28,9 @@ class TradingDirection:
     _reversed: bool
 
     def __init__(self, pair: TradingPair, reversed: bool = False) -> None:
+        if pair.is_virtual:
+            raise TypeError(f'cannot create {type(self)}: pair is virtual')
+
         self._pair = pair
         self._reversed = reversed
 
@@ -42,14 +45,19 @@ class TradingDirection:
     @property
     def buy(self) -> Instrument:
         if self._reversed:
-            return self._pair._sell
-        return self._pair._buy
+            return self._pair._sell  # type: ignore
+        return self._pair._buy  # type: ignore
 
     @property
     def sell(self) -> Instrument:
         if self._reversed:
-            return self._pair._buy
-        return self._pair._sell
+            return self._pair._buy  # type: ignore
+        return self._pair._sell  # type: ignore
+
+    def __contains__(self, __o: object) -> bool:
+        if not isinstance(__o, Instrument):
+            return False
+        return __o in self._pair
 
     def __not__(self) -> TradingDirection:
         return self.__class__(self._pair, not self._reversed)
