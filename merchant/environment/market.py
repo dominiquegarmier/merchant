@@ -14,9 +14,9 @@ from merchant.data.tickers import Ticker
 @dataclass
 class MarketOrder:
     ticker: Ticker
-    quantity: float
-    limit: float
+    quantity: int
     type: Literal['BUY', 'SELL']
+    limit: float | None = None
 
 
 @dataclass
@@ -24,7 +24,7 @@ class MarketOrderExecution:
     order: MarketOrder
     success: bool
     price: float | None
-    quantity: float | None
+    quantity: int | None
 
 
 class MarketError(Exception):
@@ -44,14 +44,14 @@ class HistoricalMarket:
 
     _start: int
     _end: int
-    _step: int
-    _timestamp: int
+
+    _dataframe: pd.DataFrame
+    _step_idx: int
 
     def __init__(
         self,
         start: int,
         end: int,
-        step: int,
         tickers: Sequence[Ticker],
         dataset: type[Dataset] = Dataset,
     ) -> None:
@@ -60,9 +60,9 @@ class HistoricalMarket:
 
         self._start = start
         self._end = end
-        self._step = step
 
-        self._timestamp = start
+        self._dataframe = self._dataset[start:end]
+        self._step_idx = 0
 
     @cached_property
     def tickers(self) -> list[Ticker]:
@@ -78,12 +78,7 @@ class HistoricalMarket:
         returns:
             int: timestamp in nanoseconds of the current simulation step
         '''
-        return self._timestamp
-
-    def start(self) -> None:
-        if self._is_running:
-            raise SimulationRunning
-        self._is_running = True
+        return self._dataframe.index[self._step_idx].value  # type: ignore
 
     def stop(self) -> None:
         if not self.is_running:
@@ -93,13 +88,15 @@ class HistoricalMarket:
     def reset(self) -> None:
         if self._is_running:
             raise SimulationRunning
-        self._timestamp = self._start
+        self._is_running = True
+        self._step_idx = 0
 
     def step(self) -> bool:
-        self._timestamp += self._step
-        return self._timestamp < self._end
+        self._step_idx += 1
+        return self._step_idx < len(self._dataframe)
 
-    def get_quotes(self, tickers: Sequence[Ticker]) -> pd.DataFrame:
+    def __getitem__(self, ticker: Ticker) -> float:
+        '''get the current price of a ticker'''
         raise NotImplementedError
 
     def _exectue_order(self, ord: MarketOrder) -> MarketOrderExecution:

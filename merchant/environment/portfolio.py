@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import Generic
+from typing import Literal
+from typing import overload
+from typing import TypeVar
+
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -8,33 +13,37 @@ from merchant.data.tickers import Ticker
 from merchant.environment.market import HistoricalMarket
 
 
-class Position:
+T = TypeVar('T', float, int)
+
+
+class Position(Generic[T]):
     _market: HistoricalMarket | None
 
-    ticker: Ticker
-    quantity: float
-    history: pd.DataFrame
+    _ticker: Ticker
+    _quantity: T
+
+    _history: pd.DataFrame
 
     def __init__(
         self,
         ticker: Ticker,
-        quantity: float,
+        quantity: T,
         market: HistoricalMarket | None,
         *,
         _require_market: bool = True,
     ) -> None:
-        self.ticker = ticker
-        self.quantity = quantity
+        self._ticker = ticker
+        self._quantity = quantity
 
         if _require_market and market is None:
             raise ValueError('market must be provided')
 
-        self.history = pd.DataFrame(
+        self._history = pd.DataFrame(
             columns=['quantity', 'unit_price'], index=pd.DatetimeIndex([])
         )
 
     def __repr__(self) -> str:
-        return f'{self.ticker} {self.quantity}'
+        return f'{self._ticker} {self._quantity}'
 
     @property
     def value(self) -> float:
@@ -42,8 +51,20 @@ class Position:
             raise ValueError('market not set')
         raise NotImplementedError
 
+    @property
+    def quantity(self) -> T:
+        return self._quantity
 
-class CashPosition(Position):
+    @quantity.setter
+    def quantity(self, quantity: T) -> None:
+        self._quantity = quantity
+
+    @property
+    def ticker(self) -> Ticker:
+        return self._ticker
+
+
+class CashPosition(Position[float]):
     def __init__(self, quantity: float) -> None:
         super().__init__(CASH, quantity, None, _require_market=False)
 
@@ -53,13 +74,13 @@ class CashPosition(Position):
 
 
 class Positions:
-    _positions: dict[Ticker, Position] = {}
+    _positions: dict[Ticker, Position[int]] = {}
     _market: HistoricalMarket
 
     def __init__(self, market: HistoricalMarket) -> None:
         self._market = market
 
-    def __getitem__(self, ticker: Ticker) -> Position:
+    def __getitem__(self, ticker: Ticker) -> Position[int]:
         if ticker not in self._positions:
             self._positions[ticker] = Position(
                 ticker=ticker, quantity=0, market=self._market
@@ -89,17 +110,50 @@ class Portfolio:
         self._positions = Positions(market=self._market)
         self._history = pd.DataFrame(columns=['open', 'high', 'low', 'close'])
 
+    def __getitem__(self, ticker: Ticker) -> Position[int]:
+        return self._positions[ticker]
+
     @property
     def value(self) -> float:
         return self._cash.value + self._positions.value
 
     @property
-    def cash_value(self) -> float:
+    def cash(self) -> float:
         return self._cash.value
 
     @property
     def positions_value(self) -> float:
         return self._positions.value
+
+    def perform_action(
+        self,
+        /,
+        *,
+        action: Literal['BUY', 'SELL'],
+        ticker: Ticker,
+        quantity: int,
+        price: float,
+    ) -> None:
+        if action == 'BUY':
+            self.buy(ticker=ticker, quantity=quantity, price=price)
+        elif action == 'SELL':
+            self.sell(ticker=ticker, quantity=quantity, price=price)
+        else:
+            raise ValueError(f'invalid action: {action}')
+
+    def buy(self, /, *, ticker: Ticker, quantity: int, price: float) -> None:
+        if self._cash.value < price * quantity:
+            raise ValueError('not enough cash')
+
+        self._cash.quantity -= price * quantity
+        self._positions[ticker].quantity += quantity
+
+    def sell(self, /, *, ticker: Ticker, quantity: int, price: float) -> None:
+        if self._positions[ticker].quantity < quantity:
+            raise ValueError('not enough quantity')
+
+        self._cash.quantity += price * quantity
+        self._positions[ticker].quantity -= quantity
 
     @property
     def pl_ratio(self) -> float | None:
