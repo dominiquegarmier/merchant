@@ -3,8 +3,8 @@ from __future__ import annotations
 from decimal import Decimal
 
 from merchant.core.numeric import NormedDecimal
-from merchant.trading.asset import Asset
 from merchant.trading.orders.direction import TradingDirection
+from merchant.trading.tools.asset import Asset
 
 
 class Order:
