@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from merchant.trading.direction import TradingDirection
-from merchant.trading.pair import TradingPair
+from merchant.core.oms.direction import TradingDirection
+from merchant.core.pms.pair import TradingPair
 
 
 class Instrument:

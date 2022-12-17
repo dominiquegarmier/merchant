@@ -5,7 +5,7 @@ from decimal import Decimal
 from decimal import ROUND_DOWN
 from functools import total_ordering
 
-from merchant.trading.instrument import Instrument
+from merchant.core.pms.instrument import Instrument
 
 
 @total_ordering

@@ -1,40 +1,30 @@
 from __future__ import annotations
 
+import functools
 from abc import ABCMeta
-from abc import abstractmethod
-from abc import abstractproperty
 from collections.abc import Collection
 
 import pandas as pd
 
-from merchant.trading.asset import Asset
-from merchant.trading.instrument import Instrument
-from merchant.trading.market import Market
+from merchant.core.oms.market import Market
+from merchant.core.pms.asset import Asset
+from merchant.core.pms.instrument import Instrument
 
 
-class HasValueHistory(metaclass=ABCMeta):
-    @abstractproperty
-    def value_history(self) -> pd.Series:
-        pass
+class _StaticPortfolio(metaclass=ABCMeta):
+    '''
+    'StaticPortfolio' represents the state of a trading portfolio a single point in time
+    '''
 
-
-class Portfolio:
     _assets: dict[Instrument, Asset]
     _connected: Market | None = None
 
-    def __init__(self, assets: Collection[Asset] | None = None) -> None:
+    def __init__(self, /, *, assets: Collection[Asset] | None = None) -> None:
         self._assets = {asset.instrument: asset for asset in assets or []}
 
     @property
     def assets(self) -> list[Asset]:
         return list(self._assets.values())
-
-    @property
-    def connected(self) -> bool:
-        return self._connected is not None
-
-    def connect(self, market: Market) -> None:
-        self._market = market
 
     def __getitem__(self, instrument: Instrument) -> Asset:
         if instrument not in self._assets:
@@ -58,11 +48,11 @@ class Portfolio:
     def has_asset(self, asset: Asset) -> bool:
         return self[asset.instrument].quantity >= asset.quantity
 
-    def __iadd__(self, asset: Asset) -> Portfolio:
+    def __iadd__(self, asset: Asset) -> _StaticPortfolio:
         self.add_asset(asset)
         return self
 
-    def __isub__(self, asset: Asset) -> Portfolio:
+    def __isub__(self, asset: Asset) -> _StaticPortfolio:
         self.remove_asset(asset)
         return self
 
@@ -74,3 +64,29 @@ class Portfolio:
 
     def __repr__(self) -> str:
         return str(self)
+
+
+class Portfolio(_StaticPortfolio):
+    '''
+    'Portfolio' represents a trading portfolio, this includes:
+        - the current state of the portfolio
+        - performance (relative to a connected market)
+        - value and trading history
+    '''
+
+    _performance_metric: Instrument
+    _market: Market
+
+    def __init__(
+        self, /, *, market: Market, assets: Collection[Asset] | None = None
+    ) -> None:
+        self._market = market
+        super().__init__(assets=assets)
+
+    @property
+    def market(self) -> Market:
+        return self._connected  # type: ignore  # no idea how to do this properly
+
+    @property
+    def value(self) -> float:
+        raise NotImplementedError
