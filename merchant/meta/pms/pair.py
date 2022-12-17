@@ -7,7 +7,7 @@ from typing import Generic
 from typing import Literal
 from typing import overload
 
-from merchant.trading.instrument import Instrument
+from merchant.meta.pms.instrument import Instrument
 
 
 class TradingPair:

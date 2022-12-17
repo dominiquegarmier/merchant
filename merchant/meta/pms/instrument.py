@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from merchant.trading.direction import TradingDirection
-from merchant.trading.pair import TradingPair
+from logging import getLogger
+
+from merchant.meta.oms.direction import TradingDirection
+from merchant.meta.pms.pair import TradingPair
+
+
+logger = getLogger(__name__)
 
 
 class Instrument:
@@ -15,6 +20,8 @@ class Instrument:
         self, symbol: str, precision: int, description: str | None = None
     ) -> None:
         self._symbol = symbol
+        if precision < 0:
+            raise ValueError('precision must be greater than 0')
         self._precision = precision
         self._description = description or ''
 
@@ -22,6 +29,10 @@ class Instrument:
         if not isinstance(__o, Instrument):
             return False
         if (self._symbol, self._precision) != (__o._symbol, __o._precision):
+            if self._description != __o._description:
+                logger.warning(
+                    f'two instruments have the same symbol and precision but different descriptions: {self._symbol}'
+                )
             return False
         return True
 

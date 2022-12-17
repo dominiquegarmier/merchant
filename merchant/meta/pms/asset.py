@@ -5,7 +5,9 @@ from decimal import Decimal
 from decimal import ROUND_DOWN
 from functools import total_ordering
 
-from merchant.trading.instrument import Instrument
+from merchant.core.numeric import normalize
+from merchant.core.numeric import NormedDecimal
+from merchant.meta.pms.instrument import Instrument
 
 
 @total_ordering
@@ -15,23 +17,21 @@ class Asset:
     it can represent a dept or a credit
     '''
 
-    _context: Context
     _instrument: Instrument
-    _quantity: Decimal
+    _quantity: NormedDecimal
     _precision: int
 
-    def __init__(self, instrument: Instrument, quantity: float | Decimal) -> None:
+    def __init__(self, instrument: Instrument, quantity: Decimal) -> None:
         self._instrument = instrument
         self._precision = instrument.precision
-        self._context = Context(prec=self._precision, rounding=ROUND_DOWN)
-        self._quantity = Decimal(value=quantity, context=self._context)
+        self._quantity = normalize(Decimal(value=quantity), prec=self._precision)
 
     @property
     def instrument(self) -> Instrument:
         return self._instrument
 
     @property
-    def quantity(self) -> Decimal:
+    def quantity(self) -> NormedDecimal:
         return self._quantity
 
     def __float__(self) -> float:
@@ -64,5 +64,8 @@ class Asset:
             raise TypeError(f'cannot subtract {self} with {__o}: different instruments')
         return self.__add__(-__o)
 
+    def __str__(self) -> str:
+        return f'{self._quantity:.{self._precision}} {self._instrument}'
+
     def __repr__(self) -> str:
-        return f'{float(self._quantity):.{self._precision}} {self._instrument}'
+        return str(self)
