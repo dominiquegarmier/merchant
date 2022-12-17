@@ -6,21 +6,19 @@ from decimal import ROUND_DOWN
 from typing import NewType
 
 
-NormedDecimal = NewType(
-    'NormedDecimal', Decimal
-)  # a decimal normalized to a given precision
-
-
-def normalize(value: Decimal, /, *, prec: int = 2) -> NormedDecimal:
+class NormedDecimal(Decimal):
     '''
-    normalize a decimal value to a given precision,
+    a decimal with a fixed precision
     '''
-    if prec < 0:
-        raise ValueError('precision must be greater than 0')
-    return NormedDecimal(value.quantize(Decimal(f'1e-{prec}'), rounding=ROUND_DOWN))
+
+    def __new__(cls, value: Decimal, /, *, prec: int = 2) -> NormedDecimal:
+        if prec < 0:
+            raise ValueError('precision must be greater than 0')
+        return super().__new__(
+            cls, value.quantize(Decimal(f'1e-{prec}'), rounding=ROUND_DOWN)
+        )
 
 
 __all__ = [
-    'normalize',
     'NormedDecimal',
 ]

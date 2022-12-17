@@ -16,10 +16,10 @@ from gym.spaces import Box
 from ray.rllib.env.env_context import EnvContext
 
 from merchant.data.tickers import Ticker
-from merchant.env._old.market import HistoricalMarket
-from merchant.env._old.market import MarketOrder
-from merchant.env._old.market import MarketOrderExecution
-from merchant.env._old.portfolio import Portfolio
+from merchant.environment._old.market import HistoricalMarket
+from merchant.environment._old.market import MarketOrder
+from merchant.environment._old.market import MarketOrderExecution
+from merchant.environment._old.portfolio import Portfolio
 
 logger = getLogger(__name__)
 

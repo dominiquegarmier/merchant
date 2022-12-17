@@ -7,7 +7,7 @@ from logging import getLogger
 from typing import Generic
 from typing import TypeVar
 
-import numpy as np
+import pandas as pd
 
 logger = getLogger(__name__)
 
@@ -44,38 +44,38 @@ class InternalClockBase(Generic[T, U], metaclass=ABCMeta):
         return str(self)
 
 
-class NSClock(InternalClockBase[np.datetime64, np.timedelta64], metaclass=ABCMeta):
+class NSClock(InternalClockBase[pd.Timestamp, pd.Timedelta], metaclass=ABCMeta):
     '''
     clock object that
     '''
 
-    _start: np.datetime64
-    _time: np.datetime64
-    _incr: np.timedelta64
+    _start: pd.Timestamp
+    _time: pd.Timestamp
+    _incr: pd.Timedelta
 
     def __init__(
-        self, /, *, start: np.datetime64, incr: np.timedelta64 | None = None
+        self, /, *, start: pd.Timestamp, incr: pd.Timedelta | None = None
     ) -> None:
         self._start = start
         self._time = start
         if incr is None:
-            incr = np.timedelta64(1, 's')
+            incr = pd.Timedelta(1, unit='s')
         self._incr = incr
 
     @property
-    def time(self) -> np.datetime64:
+    def time(self) -> pd.Timestamp:
         return self._time
 
     @property
-    def increment(self) -> np.timedelta64:
+    def increment(self) -> pd.Timedelta:
         return self._incr
 
     @increment.setter
-    def increment(self, incr: np.timedelta64) -> None:
+    def increment(self, incr: pd.Timedelta) -> None:
         self._incr = incr
 
     def step(
-        self, incr: np.timedelta64 | None = None, to: np.datetime64 | None = None
+        self, incr: pd.Timedelta | None = None, to: pd.Timestamp | None = None
     ) -> None:
         if to is not None and incr is not None:
             raise ValueError('Cannot specify both `to` and `incr`')

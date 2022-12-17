@@ -3,24 +3,24 @@ from __future__ import annotations
 from decimal import Decimal
 
 from merchant.core.numeric import NormedDecimal
-from merchant.meta.oms.direction import TradingDirection
-from merchant.meta.pms.asset import Asset
+from merchant.trading.asset import Asset
+from merchant.trading.orders.direction import TradingDirection
 
 
 class Order:
     _direction: TradingDirection
-    _quantity: Decimal
+    _quantity: NormedDecimal
 
-    def __init__(self, direction: TradingDirection, quantity: NormedDecimal) -> None:
+    def __init__(self, direction: TradingDirection, quantity: Decimal) -> None:
         self._direction = direction
-        self._quantity = quantity
+        self._quantity = NormedDecimal(quantity, prec=direction.buy.precision)
 
     @property
     def direction(self) -> TradingDirection:
         return self._direction
 
     @property
-    def quantity(self) -> Decimal:
+    def quantity(self) -> NormedDecimal:
         return self._quantity
 
 

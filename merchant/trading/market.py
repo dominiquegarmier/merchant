@@ -7,11 +7,11 @@ from typing import overload
 
 from merchant.core.clock import HasInternalClock
 from merchant.core.clock import NSClock
-from merchant.meta.oms.order import Order
-from merchant.meta.oms.order import OrderExecution
-from merchant.meta.pms.instrument import Instrument
-from merchant.meta.pms.pair import TradingPair
-from merchant.meta.pms.portfolio import Portfolio
+from merchant.trading.orders.order import Order
+from merchant.trading.orders.order import OrderExecution
+from merchant.trading.portfolio import Portfolio
+from merchant.trading.tools.instrument import Instrument
+from merchant.trading.tools.pair import TradingPair
 
 
 class Market:

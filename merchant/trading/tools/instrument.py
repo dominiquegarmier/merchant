@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from logging import getLogger
 
-from merchant.meta.oms.direction import TradingDirection
-from merchant.meta.pms.pair import TradingPair
+from merchant.trading.orders.direction import TradingDirection
+from merchant.trading.tools.pair import TradingPair
 
 
 logger = getLogger(__name__)

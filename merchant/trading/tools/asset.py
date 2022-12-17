@@ -5,9 +5,8 @@ from decimal import Decimal
 from decimal import ROUND_DOWN
 from functools import total_ordering
 
-from merchant.core.numeric import normalize
 from merchant.core.numeric import NormedDecimal
-from merchant.meta.pms.instrument import Instrument
+from merchant.trading.tools.instrument import Instrument
 
 
 @total_ordering
@@ -24,7 +23,7 @@ class Asset:
     def __init__(self, instrument: Instrument, quantity: Decimal) -> None:
         self._instrument = instrument
         self._precision = instrument.precision
-        self._quantity = normalize(Decimal(value=quantity), prec=self._precision)
+        self._quantity = NormedDecimal(quantity, prec=self._precision)
 
     @property
     def instrument(self) -> Instrument:

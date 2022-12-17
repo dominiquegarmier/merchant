@@ -7,7 +7,7 @@ from typing import Generic
 from typing import Literal
 from typing import overload
 
-from merchant.meta.pms.instrument import Instrument
+from merchant.trading.tools.instrument import Instrument
 
 
 class TradingPair:
@@ -37,7 +37,7 @@ class TradingPair:
     _sell: Instrument | None
 
     @overload
-    def __init__(self, buy: Instrument, sell: Instrument) -> None:
+    def __init__(self, buy: None, sell: Instrument) -> None:
         ...
 
     @overload
@@ -45,10 +45,10 @@ class TradingPair:
         ...
 
     @overload
-    def __init__(self, buy: None, sell: Instrument) -> None:
+    def __init__(self, buy: Instrument, sell: Instrument) -> None:
         ...
 
-    def __init__(self, buy: Instrument | None, sell: Instrument | None) -> None:
+    def __init__(self, buy, sell) -> None:
         if buy is None and sell is None:
             raise TypeError(f'cannot create {type(self)}: both instruments are None')
         self._buy = buy

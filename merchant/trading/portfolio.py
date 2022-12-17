@@ -9,11 +9,10 @@ import pandas as pd
 
 from merchant.core.clock import HasInternalClock
 from merchant.core.clock import NSClock
-from merchant.core.numeric import normalize
 from merchant.core.numeric import NormedDecimal
-from merchant.meta.oms.market import MarketSimulation
-from merchant.meta.pms.asset import Asset
-from merchant.meta.pms.instrument import Instrument
+from merchant.trading.market import MarketSimulation
+from merchant.trading.tools.asset import Asset
+from merchant.trading.tools.instrument import Instrument
 
 
 class _StaticPortfolio(metaclass=ABCMeta):
@@ -33,7 +32,8 @@ class _StaticPortfolio(metaclass=ABCMeta):
     def __getitem__(self, instrument: Instrument) -> Asset:
         if instrument not in self._assets:
             return Asset(
-                instrument, quantity=normalize(Decimal(0), prec=instrument.precision)
+                instrument,
+                quantity=NormedDecimal(Decimal(0), prec=instrument.precision),
             )
         return self._assets[instrument]
 
