@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-from abc import ABCMeta
-from abc import abstractmethod
-from abc import abstractproperty
 from collections.abc import Collection
 from collections.abc import Sequence
 from decimal import Decimal
 from typing import overload
 
-from merchant.core.numeric import DEFAULT_CONTEXT
-from merchant.core.numeric import Numeric
-from merchant.core.oms.direction import TradingDirection
-from merchant.core.oms.order import Order
-from merchant.core.oms.order import OrderExecution
-from merchant.core.pms.asset import Asset
-from merchant.core.pms.instrument import Instrument
-from merchant.core.pms.pair import TradingPair
-from merchant.core.pms.portfolio import Portfolio
+from merchant.core.clock import HasInternalClock
+from merchant.core.clock import NSClock
+from merchant.meta.oms.order import Order
+from merchant.meta.oms.order import OrderExecution
+from merchant.meta.pms.instrument import Instrument
+from merchant.meta.pms.pair import TradingPair
+from merchant.meta.pms.portfolio import Portfolio
 
 
 class Market:
@@ -94,14 +89,15 @@ class Market:
         raise NotImplementedError
 
 
-class MarketSimulation:
+class MarketSimulation(HasInternalClock[NSClock]):
     '''
     a simulation of a market, with a portfolio
     '''
 
     _market: Market
 
-    def __init__(self, market: Market) -> None:
+    def __init__(self, market: Market, clock: NSClock) -> None:
+        self._clock = clock
         self._market = market
 
     @overload

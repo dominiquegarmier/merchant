@@ -2,19 +2,18 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from merchant.core.numeric import DEFAULT_CONTEXT
-from merchant.core.numeric import Numeric
-from merchant.core.oms.direction import TradingDirection
-from merchant.core.pms.asset import Asset
+from merchant.core.numeric import NormedDecimal
+from merchant.meta.oms.direction import TradingDirection
+from merchant.meta.pms.asset import Asset
 
 
 class Order:
     _direction: TradingDirection
     _quantity: Decimal
 
-    def __init__(self, direction: TradingDirection, quantity: Numeric) -> None:
+    def __init__(self, direction: TradingDirection, quantity: NormedDecimal) -> None:
         self._direction = direction
-        self._quantity = Decimal(quantity, context=DEFAULT_CONTEXT)
+        self._quantity = quantity
 
     @property
     def direction(self) -> TradingDirection:

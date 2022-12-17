@@ -2,20 +2,25 @@ from __future__ import annotations
 
 from decimal import Context
 from decimal import Decimal
-from decimal import ROUND_HALF_DOWN
-
-Numeric = float | int | Decimal
-
-DEFAULT_CONTEXT = Context(prec=28, rounding=ROUND_HALF_DOWN)
+from decimal import ROUND_DOWN
+from typing import NewType
 
 
-def to_decimal(value: Numeric, context: Context = DEFAULT_CONTEXT) -> Decimal:
-    if isinstance(value, Decimal):
-        return value.quantize(Decimal('1E-28'), context=context)
-    return Decimal(value, context=context)
+NormedDecimal = NewType(
+    'NormedDecimal', Decimal
+)  # a decimal normalized to a given precision
+
+
+def normalize(value: Decimal, /, *, prec: int = 2) -> NormedDecimal:
+    '''
+    normalize a decimal value to a given precision,
+    '''
+    if prec < 0:
+        raise ValueError('precision must be greater than 0')
+    return NormedDecimal(value.quantize(Decimal(f'1e-{prec}'), rounding=ROUND_DOWN))
 
 
 __all__ = [
-    'Numeric',
-    'DEFAULT_CONTEXT',
+    'normalize',
+    'NormedDecimal',
 ]

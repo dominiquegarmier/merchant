@@ -3,12 +3,17 @@ from __future__ import annotations
 import functools
 from abc import ABCMeta
 from collections.abc import Collection
+from decimal import Decimal
 
 import pandas as pd
 
-from merchant.core.oms.market import Market
-from merchant.core.pms.asset import Asset
-from merchant.core.pms.instrument import Instrument
+from merchant.core.clock import HasInternalClock
+from merchant.core.clock import NSClock
+from merchant.core.numeric import normalize
+from merchant.core.numeric import NormedDecimal
+from merchant.meta.oms.market import MarketSimulation
+from merchant.meta.pms.asset import Asset
+from merchant.meta.pms.instrument import Instrument
 
 
 class _StaticPortfolio(metaclass=ABCMeta):
@@ -17,7 +22,6 @@ class _StaticPortfolio(metaclass=ABCMeta):
     '''
 
     _assets: dict[Instrument, Asset]
-    _connected: Market | None = None
 
     def __init__(self, /, *, assets: Collection[Asset] | None = None) -> None:
         self._assets = {asset.instrument: asset for asset in assets or []}
@@ -28,7 +32,9 @@ class _StaticPortfolio(metaclass=ABCMeta):
 
     def __getitem__(self, instrument: Instrument) -> Asset:
         if instrument not in self._assets:
-            return Asset(instrument, quantity=0)
+            return Asset(
+                instrument, quantity=normalize(Decimal(0), prec=instrument.precision)
+            )
         return self._assets[instrument]
 
     def add_asset(self, asset: Asset) -> None:
@@ -66,7 +72,7 @@ class _StaticPortfolio(metaclass=ABCMeta):
         return str(self)
 
 
-class Portfolio(_StaticPortfolio):
+class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     '''
     'Portfolio' represents a trading portfolio, this includes:
         - the current state of the portfolio
@@ -75,18 +81,21 @@ class Portfolio(_StaticPortfolio):
     '''
 
     _performance_metric: Instrument
-    _market: Market
+    _market: MarketSimulation
+
+    _value_history: pd.Series[NormedDecimal]
 
     def __init__(
-        self, /, *, market: Market, assets: Collection[Asset] | None = None
+        self, /, *, market: MarketSimulation, assets: Collection[Asset] | None = None
     ) -> None:
         self._market = market
+        self._clock = self._market.clock
         super().__init__(assets=assets)
 
     @property
-    def market(self) -> Market:
-        return self._connected  # type: ignore  # no idea how to do this properly
+    def market(self) -> MarketSimulation:
+        return self._market
 
     @property
-    def value(self) -> float:
+    def value(self) -> NormedDecimal:
         raise NotImplementedError
