@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import functools
 from abc import ABCMeta
+from collections.abc import Callable
 from collections.abc import Collection
 from decimal import Decimal
+from functools import cache
+from typing import Any
+from typing import Concatenate
+from typing import ParamSpec
+from typing import TypeVar
 
 import pandas as pd
 
@@ -11,6 +17,7 @@ from merchant.core.clock import HasInternalClock
 from merchant.core.clock import NSClock
 from merchant.core.numeric import NormedDecimal
 from merchant.trading.market import MarketSimulation
+from merchant.trading.portfolio.benchmarks import _Benchmark
 from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.instrument import Instrument
 
@@ -72,6 +79,39 @@ class _StaticPortfolio(metaclass=ABCMeta):
         return str(self)
 
 
+P = ParamSpec('P')
+R = TypeVar('R')
+
+
+class _BenchmarkCache:
+    _hooked: bool = False
+    _cache: dict[_Benchmark, Any] = {}
+
+    def __contains__(self, benchmark: _Benchmark[P, R]) -> bool:
+        return benchmark in self._cache
+
+    def __getitem__(self, benchmark: _Benchmark[P, R]) -> R:
+        return self._cache[benchmark]  # type: ignore
+
+    def __setitem__(self, benchmark: _Benchmark[P, R], value: R) -> None:
+        self._cache[benchmark] = value
+
+    def _invalidate(self) -> None:
+        self._cache.clear()
+
+
+def cached_benchmark(
+    func: Callable[[Portfolio, _Benchmark[P, R]], R]
+) -> Callable[[Portfolio, _Benchmark[P, R]], R]:
+    @functools.wraps(func)
+    def wrapper(self: Portfolio, bm: _Benchmark[P, R]) -> R:
+        if bm not in self._benchmark_cache:
+            self._benchmark_cache[bm] = func(self, bm)
+        return self._benchmark_cache[bm]
+
+    return wrapper
+
+
 class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     '''
     'Portfolio' represents a trading portfolio, this includes:
@@ -81,6 +121,7 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     '''
 
     _benchmark_instrument: Instrument
+    _benchmark_cache: _BenchmarkCache
     _benchmarks: tuple[str, ...] = (
         'pl_ratio',
         'volatility',
@@ -127,3 +168,7 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
         if name in self._benchmarks:
             raise NotImplementedError
         return getattr(self, name)
+
+    @cached_benchmark
+    def _get_benchmark(self, bm: _Benchmark) -> object:
+        raise NotImplementedError
