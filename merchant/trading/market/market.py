@@ -7,8 +7,8 @@ from typing import overload
 
 from merchant.core.clock import HasInternalClock
 from merchant.core.clock import NSClock
-from merchant.trading.orders.order import Order
-from merchant.trading.orders.order import OrderExecution
+from merchant.trading.action.order import Order
+from merchant.trading.action.order import OrderExecution
 from merchant.trading.portfolio import Portfolio
 from merchant.trading.tools.instrument import Instrument
 from merchant.trading.tools.pair import TradingPair

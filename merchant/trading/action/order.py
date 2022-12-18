@@ -3,11 +3,13 @@ from __future__ import annotations
 from decimal import Decimal
 
 from merchant.core.numeric import NormedDecimal
-from merchant.trading.orders.direction import TradingDirection
+from merchant.trading.action.base import Action
+from merchant.trading.action.base import ActionExecution
 from merchant.trading.tools.asset import Asset
+from merchant.trading.tools.direction import TradingDirection
 
 
-class Order:
+class Order(Action):
     _direction: TradingDirection
     _quantity: NormedDecimal
 
@@ -24,7 +26,7 @@ class Order:
         return self._quantity
 
 
-class OrderExecution:
+class OrderExecution(ActionExecution):
     _order: Order
     _success: bool
     _movements: tuple[Asset, Asset]

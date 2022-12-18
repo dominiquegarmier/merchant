@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from decimal import Context
 from decimal import Decimal
-from decimal import ROUND_DOWN
 from functools import total_ordering
 
 from merchant.core.numeric import NormedDecimal
@@ -20,7 +18,7 @@ class Asset:
     _quantity: NormedDecimal
     _precision: int
 
-    def __init__(self, instrument: Instrument, quantity: Decimal) -> None:
+    def __init__(self, instrument: Instrument, /, *, quantity: Decimal) -> None:
         self._instrument = instrument
         self._precision = instrument.precision
         self._quantity = NormedDecimal(quantity, prec=self._precision)
@@ -53,15 +51,21 @@ class Asset:
     def __add__(self, __o: Asset) -> Asset:
         if self._instrument != __o._instrument:
             raise TypeError(f'cannot add {self} with {__o}: different instruments')
-        return Asset(self._instrument, self._quantity + __o._quantity)
+        return Asset(self._instrument, quantity=self._quantity + __o._quantity)
 
     def __neg__(self) -> Asset:
-        return Asset(self._instrument, -self._quantity)
+        return Asset(self._instrument, quantity=-self._quantity)
 
     def __sub__(self, __o: Asset) -> Asset:
         if self._instrument != __o._instrument:
             raise TypeError(f'cannot subtract {self} with {__o}: different instruments')
         return self.__add__(-__o)
+
+    def __mul__(self, __o: Decimal) -> Asset:
+        return Asset(self._instrument, quantity=self._quantity * __o)
+
+    def __rmul__(self, __o: Decimal) -> Asset:
+        return self.__mul__(__o)
 
     def __str__(self) -> str:
         return f'{self._quantity:.{self._precision}} {self._instrument}'

@@ -80,10 +80,21 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
         - value and trading history
     '''
 
-    _performance_metric: Instrument
-    _market: MarketSimulation
+    _benchmark_instrument: Instrument
+    _benchmarks: tuple[str, ...] = (
+        'pl_ratio',
+        'volatility',
+        'cagr',
+        'jensen_alpha',
+        'sharpe_ratio',
+        'calmar_ratio',
+        'sortino_ratio',
+        'treynor_ratio',
+        'max_drawdown_ratio',
+    )
 
-    _value_history: pd.Series[NormedDecimal]
+    _market: MarketSimulation
+    _value_history: pd.Series
 
     def __init__(
         self, /, *, market: MarketSimulation, assets: Collection[Asset] | None = None
@@ -99,3 +110,20 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     @property
     def value(self) -> NormedDecimal:
         raise NotImplementedError
+
+    @property
+    def benchmark_instrument(self) -> Instrument:
+        return self._benchmark
+
+    @benchmark_instrument.setter
+    def benchmark_instrument(self, instrument: Instrument) -> None:
+        self._benchmark = instrument
+
+    @property
+    def benchmarks(self) -> tuple[str, ...]:
+        return self._benchmarks
+
+    def __getattr__(self, name: str) -> object:
+        if name in self._benchmarks:
+            raise NotImplementedError
+        return getattr(self, name)
