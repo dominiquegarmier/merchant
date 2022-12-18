@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import functools
+import inspect
 from abc import ABCMeta
+from collections.abc import Callable
 from collections.abc import Collection
 from decimal import Decimal
+from functools import cache
+from typing import Any
+from typing import Concatenate
+from typing import ParamSpec
+from typing import TypeVar
 
 import pandas as pd
 
@@ -11,6 +18,8 @@ from merchant.core.clock import HasInternalClock
 from merchant.core.clock import NSClock
 from merchant.core.numeric import NormedDecimal
 from merchant.trading.market import MarketSimulation
+from merchant.trading.portfolio.benchmarks import Benchmark
+from merchant.trading.portfolio.benchmarks import BoundBenchmark
 from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.instrument import Instrument
 
@@ -66,10 +75,13 @@ class _StaticPortfolio(metaclass=ABCMeta):
         return self[instrument].quantity > 0
 
     def __str__(self) -> str:
-        return f'{type(self)}({self._assets!r})'
+        return f'{type(self)}(...)'
 
     def __repr__(self) -> str:
         return str(self)
+
+
+ArgsKwargs = tuple[tuple[Any], dict[str, Any]]
 
 
 class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
@@ -81,17 +93,8 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     '''
 
     _benchmark_instrument: Instrument
-    _benchmarks: tuple[str, ...] = (
-        'pl_ratio',
-        'volatility',
-        'cagr',
-        'jensen_alpha',
-        'sharpe_ratio',
-        'calmar_ratio',
-        'sortino_ratio',
-        'treynor_ratio',
-        'max_drawdown_ratio',
-    )
+    _benchmarks: dict[Benchmark, tuple[ArgsKwargs, ...]]
+    _bound_benchmarks: dict[Benchmark, BoundBenchmark]
 
     _market: MarketSimulation
     _value_history: pd.Series
@@ -99,9 +102,23 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     def __init__(
         self, /, *, market: MarketSimulation, assets: Collection[Asset] | None = None
     ) -> None:
+        super().__init__(assets=assets)
+
         self._market = market
         self._clock = self._market.clock
-        super().__init__(assets=assets)
+
+        for benchmark, arg_tuple in self._benchmarks.items():
+            bound_benchmark = benchmark(self)
+            self._bound_benchmarks[benchmark] = bound_benchmark
+            # check types
+            sig = inspect.signature(bound_benchmark)
+            for args, kwargs in arg_tuple:
+                try:
+                    sig.bind(*args, **kwargs)
+                except TypeError as e:
+                    raise TypeError(
+                        f'Invalid arguments for {benchmark!r} bound to {self!r}'
+                    ) from e
 
     @property
     def market(self) -> MarketSimulation:
@@ -120,8 +137,8 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
         self._benchmark = instrument
 
     @property
-    def benchmarks(self) -> tuple[str, ...]:
-        return self._benchmarks
+    def benchmarks(self) -> tuple[Benchmark, ...]:
+        return tuple(self._benchmarks.keys())
 
     def __getattr__(self, name: str) -> object:
         if name in self._benchmarks:

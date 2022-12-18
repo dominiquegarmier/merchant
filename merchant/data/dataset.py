@@ -72,6 +72,7 @@ def _get_agg_interval(
             agg.close,
             agg.volume,
         ]  # convert ms timestamp to ns
+    raise NotImplementedError
 
 
 def _normalize_data(data: pd.DataFrame) -> pa.Table:
@@ -185,6 +186,7 @@ class Dataset:
                 & (ds.field('timestamp') <= ts_to)
             ),
         )
+        raise NotImplementedError
         return (
             table.to_pandas()
             .pivot(index='timestamp', columns='exchange:ticker')
