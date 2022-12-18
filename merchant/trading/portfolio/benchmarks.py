@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from abc import ABCMeta
+from abc import abstractmethod
 from collections.abc import Callable
+from collections.abc import Hashable
 from collections.abc import Sequence
 from functools import wraps
+from typing import Any
+from typing import Concatenate
 from typing import Generic
+from typing import Literal
 from typing import NewType
 from typing import overload
 from typing import ParamSpec
@@ -11,143 +17,250 @@ from typing import TypeVar
 
 import pandas as pd
 
+from merchant.trading.portfolio.portfolio import Portfolio
 from merchant.trading.portfolio.trade import Trade
 
 
 P = ParamSpec('P')
+T = TypeVar('T', bound='AbstractBenchmark')
 R = TypeVar('R')
 
+BenchmarkResult = float
+# force the use of 'chached_benchmark' decorator on '__call__' method
+# the only way to return _BenchmarkResult is to use the decorator
+# TODO: should this be done like that?
+_BenchmarkResult = NewType('_BenchmarkResult', BenchmarkResult)
 
-class _Benchmark(Generic[P, R]):
-    _name: str
-    _description: str
-    _func: Callable[P, R]
 
-    def __init__(self, /, *, name: str, description: str, func: Callable[P, R]) -> None:
-        self._name = name
-        self._description = description
-        self._func = func
+def cached_benchmark(
+    func: Callable[Concatenate[T, P], BenchmarkResult]
+) -> Callable[Concatenate[T, P], _BenchmarkResult]:
+    @wraps(func)
+    def inner(self: T, *args: P.args, **kwargs: P.kwargs) -> _BenchmarkResult:
+        key = hash((args, tuple(kwargs.items())))
+        if key not in self._cache:
+            self._cache[key] = func(self, *args, **kwargs)
+        return _BenchmarkResult(self._cache[key])
 
+    return inner
+
+
+class BenchmarkMeta(ABCMeta):
     def __hash__(self) -> int:
         return super().__hash__()
 
     def __eq__(self, __o: object) -> bool:
-        if not isinstance(__o, _Benchmark):
-            return NotImplemented
+        if not isinstance(__o, BenchmarkMeta):
+            return False
         return self is __o
 
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
-        return self._func(*args, **kwargs)
+    def __repr__(self) -> str:
+        return f'Benchmark {self.__name__}'
 
 
-@overload
-def benchmark(func: Callable[P, R], /, *, desc: None = None) -> _Benchmark[P, R]:
-    ...
+class AbstractBenchmark(metaclass=BenchmarkMeta):
+    _description: str = ''
+    _name: str = ''
+
+    _portfolio: Portfolio
+    _cache: dict[int, BenchmarkResult]
+
+    def __init__(self, portfolio: Portfolio) -> None:
+        self._name = self._name or type(self).__name__
+        self._description = self._description or self.__doc__ or self._name
+        self._portfolio = portfolio
+
+    @abstractmethod
+    @cached_benchmark
+    def __call__(self, *args: Any, **kwargs: Any) -> BenchmarkResult:
+        ...
+
+    def __hash__(self) -> int:
+        return hash((type(self), self._portfolio))
+
+    def __str__(self) -> str:
+        return f'{self._name}: {self._description}, {self._portfolio!r}'
+
+    def __repr__(self) -> str:
+        return str(self)
 
 
-@overload
-def benchmark(
-    func: None = None, /, *, desc: str = ''
-) -> Callable[[Callable[P, R]], _Benchmark[P, R]]:
-    ...
+class _Volatility(AbstractBenchmark):
+    '''Volatility of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-def benchmark(
-    func: Callable[P, R] | None = None, desc: str | None = None
-) -> _Benchmark[P, R] | Callable[[Callable[P, R]], _Benchmark[P, R]]:
-    if func is None:
+class _RollingVolatility(AbstractBenchmark):
+    '''Volatility of the portfolio'''
 
-        def inner_dec(inner_func: Callable[P, R]) -> _Benchmark[P, R]:
-            return _Benchmark(
-                name=inner_func.__name__, description=desc or '', func=inner_func
-            )
-
-        return inner_dec
-    return _Benchmark(name=func.__name__, description=desc or '', func=func)
+    @cached_benchmark
+    def __call__(self, window: str | int = '1d') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-Benchmarkable = NewType('Benchmarkable', pd.Series)
-BenchmarkResult = NewType('BenchmarkResult', object)
+class _SharpeRatio(AbstractBenchmark):
+    '''Sharpe ratio of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-def _get_winning_trades(positions: Sequence[Trade]) -> list[Trade]:
-    raise NotImplementedError
+class _RollingSharpeRatio(AbstractBenchmark):
+    '''Sharpe ratio of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, window: str | int = '1d') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-def _get_losing_trades(positions: Sequence[Trade]) -> list[Trade]:
-    raise NotImplementedError
+class _SortinoRatio(AbstractBenchmark):
+    '''Sortino ratio of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def volatility(value: Benchmarkable, _period: str | int = 'ytd') -> float:
-    raise NotImplementedError
+class _RollingSortinoRatio(AbstractBenchmark):
+    '''Sortino ratio of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, window: str | int = '1d') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def rolling_valatility(value: Benchmarkable, _window: str | int = '1d') -> float:
-    raise NotImplementedError
+class _Beta(AbstractBenchmark):
+    '''Beta of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def sharpe_ratio(value: Benchmarkable, _period: str | int = 'ytd') -> float:
-    raise NotImplementedError
+class _RollingBeta(AbstractBenchmark):
+    '''Beta of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, window: str | int = '1d') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def rolling_sharpe_ratio(value: Benchmarkable, _window: str | int = '1d') -> float:
-    raise NotImplementedError
+class _MaxDrawdownRatio(AbstractBenchmark):
+    '''Max drawdown ratio of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def sortino_ratio(value: Benchmarkable, _period: str | int = 'ytd') -> float:
-    raise NotImplementedError
+class _GainToPainRatio(AbstractBenchmark):
+    '''Gain to pain ratio of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def rolling_sortino_ratio(value: Benchmarkable, _window: str | int = '1d') -> float:
-    raise NotImplementedError
+class _JensenAlpha(AbstractBenchmark):
+    '''Jensen alpha of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def beta(value: Benchmarkable, _period: str | int = 'ytd') -> float:
-    raise NotImplementedError
+class _CalmarRatio(AbstractBenchmark):
+    '''Calmar ratio of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def rolling_beta(value: Benchmarkable, _window: str | int = '1d') -> float:
-    raise NotImplementedError
+class _KellyCriterion(AbstractBenchmark):
+    '''Kelly criterion of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def max_drawdown_ratio(value: Benchmarkable, _period: str | int = 'ytd') -> float:
-    raise NotImplementedError
+class _TrackingError(AbstractBenchmark):
+    '''Tracking error of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def gain_to_pain_ratio(value: Benchmarkable, _period: str | int = 'ytd') -> float:
-    raise NotImplementedError
+class _InformationRatio(AbstractBenchmark):
+    '''Information ratio of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def jensen_alpha(value: Benchmarkable, _period: str | int = 'ytd') -> float:
-    raise NotImplementedError
+class _TreynorRatio(AbstractBenchmark):
+    '''Treynor ratio of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def calmar_ratio(value: Benchmarkable, _period: str | int = 'ytd') -> float:
-    raise NotImplementedError
+class _CompoundAnnualGrowthRate(AbstractBenchmark):
+    '''Compound annual growth rate of the portfolio'''
+
+    @cached_benchmark
+    def __call__(self, period: str | int = 'ytd') -> BenchmarkResult:
+        raise NotImplementedError
 
 
-@benchmark(desc='')
-def kelly_criterion(value: Benchmarkable, _period: str | int = 'ytd') -> float:
-    raise NotImplementedError
+# type of a benchmark class
+Benchmark = BenchmarkMeta
 
+VOLATILITY = _Volatility
+ROLLING_VOLATILITY = _RollingVolatility
+SHARPE_RATIO = _SharpeRatio
+ROLLING_SHARPE_RATIO = _RollingSharpeRatio
+SORTINO_RATIO = _SortinoRatio
+ROLLING_SORTINO_RATIO = _RollingSortinoRatio
+BETA = _Beta
+ROLLING_BETA = _RollingBeta
+MAX_DRAWDOWN_RATIO = _MaxDrawdownRatio
+GAIN_TO_PAIN_RATIO = _GainToPainRatio
+JENSEN_ALPHA = _JensenAlpha
+CALMAR_RATIO = _CalmarRatio
+KELLY_CRITERION = _KellyCriterion
+TRACKING_ERROR = _TrackingError
+INFORMATION_RATIO = _InformationRatio
+TREYNOR_RATIO = _TreynorRatio
+COMPOUND_ANNUAL_GROWTH_RATE = _CompoundAnnualGrowthRate
 
-@benchmark(desc='')
-def tracking_error(value: Benchmarkable, _period: str | int = 'ytd') -> float:
-    raise NotImplementedError
-
-
-@benchmark(desc='')
-def information_ratio(value: Benchmarkable, _period: str | int = 'ytd') -> float:
-    raise NotImplementedError
+__all__ = [
+    'AbstractBenchmark',
+    'cached_benchmark',
+    'Benchmark',
+    'VOLATILITY',
+    'ROLLING_VOLATILITY',
+    'SHARPE_RATIO',
+    'ROLLING_SHARPE_RATIO',
+    'SORTINO_RATIO',
+    'ROLLING_SORTINO_RATIO',
+    'BETA',
+    'ROLLING_BETA',
+    'MAX_DRAWDOWN_RATIO',
+    'GAIN_TO_PAIN_RATIO',
+    'JENSEN_ALPHA',
+    'CALMAR_RATIO',
+    'KELLY_CRITERION',
+    'TRACKING_ERROR',
+    'INFORMATION_RATIO',
+    'TREYNOR_RATIO',
+    'COMPOUND_ANNUAL_GROWTH_RATE',
+]

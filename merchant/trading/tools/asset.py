@@ -34,6 +34,9 @@ class Asset:
     def __float__(self) -> float:
         return float(self._quantity)
 
+    def __hash__(self) -> int:
+        return hash((self._instrument, self._quantity))
+
     def __eq__(self, __o: object) -> bool:
         if not isinstance(__o, Asset):
             return False
