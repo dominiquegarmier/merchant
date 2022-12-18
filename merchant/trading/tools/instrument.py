@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from logging import getLogger
 
-from merchant.meta.oms.direction import TradingDirection
-from merchant.meta.pms.pair import TradingPair
+from merchant.trading.tools.asset import Asset
+from merchant.trading.tools.direction import TradingDirection
+from merchant.trading.tools.pair import TradingPair
 
 
 logger = getLogger(__name__)
 
 
 class Instrument:
-    '''An instrument is a unit that can be traded, in TradingPairs with other instruments'''
+    '''
+    An instrument is a unit that can be traded, in TradingPairs with other instruments
+    '''
 
     _symbol: str
     _precision: int
@@ -54,6 +58,14 @@ class Instrument:
 
     def __rtruediv__(self, __o: Instrument | None) -> TradingPair:
         return TradingPair(__o, self)
+
+    def __mul__(self, __o: Decimal) -> Asset:
+        '''allows you to create an 'Asset' with A * n'''
+        return Asset(self, quantity=__o)
+
+    def __rmul__(self, __o: Decimal) -> Asset:
+        '''allows you to create an 'Asset' with n * A'''
+        return self.__mul__(__o)
 
     def __gt__(self, __o: Instrument) -> TradingDirection:
         '''allows you to create a 'TradingDirection' with A > B'''

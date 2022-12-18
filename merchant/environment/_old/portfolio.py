@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 
 from merchant.data.tickers import CASH
 from merchant.data.tickers import Ticker
-from merchant.env._old.market import HistoricalMarket
+from merchant.environment._old.market import HistoricalMarket
 
 
 T = TypeVar('T', float, int)
