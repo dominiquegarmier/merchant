@@ -76,6 +76,9 @@ class AbstractBenchmark(metaclass=BenchmarkMeta):
     def __call__(self, *args: Any, **kwargs: Any) -> BenchmarkResult:
         ...
 
+    def invalidate_cache(self) -> None:
+        self._cache = {}
+
     def __hash__(self) -> int:
         return hash((type(self), self._portfolio))
 
