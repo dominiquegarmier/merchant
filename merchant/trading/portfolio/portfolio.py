@@ -82,6 +82,20 @@ class _StaticPortfolio(metaclass=ABCMeta):
 
 
 ArgsKwargs = tuple[tuple[Any], dict[str, Any]]
+TPortfolio = TypeVar('TPortfolio', bound='Portfolio')
+P = ParamSpec('P')
+R = TypeVar('R')
+
+
+def invalidates_cache(
+    func: Callable[Concatenate[TPortfolio, P], R]
+) -> Callable[Concatenate[TPortfolio, P], R]:
+    @functools.wraps(func)
+    def wrapper(self: TPortfolio, *args: P.args, **kwargs: P.kwargs) -> R:
+        self._invalidate_cache()
+        return func(self, *args, **kwargs)
+
+    return wrapper
 
 
 class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
@@ -140,7 +154,6 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     def benchmarks(self) -> tuple[Benchmark, ...]:
         return tuple(self._benchmarks.keys())
 
-    def __getattr__(self, name: str) -> object:
-        if name in self._benchmarks:
-            raise NotImplementedError
-        return getattr(self, name)
+    def _invalidate_cache(self) -> None:
+        for benchmark in self._bound_benchmarks.values():
+            benchmark.invalidate_cache()
