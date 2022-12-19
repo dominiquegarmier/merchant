@@ -26,7 +26,7 @@ class Hook(Generic[T]):
     _func: Callable[[], None]
     _event_type: Literal['tick', 'time']
     _time: T | None = None
-    _detached: bool = False
+    _active: bool = False
 
     def __init__(
         self,
@@ -42,24 +42,31 @@ class Hook(Generic[T]):
             raise ValueError('Must specify time for time-based hook')
         self._time = time
 
+    def reset(self) -> None:
+        self._active = True
+
     def check_hook(self, time: T) -> bool:
         if self._event_type == 'tick':
             return True
-        elif self._event_type == 'time':
-            return time >= self._time  # type: ignore
+        elif self._event_type == 'time' and self._active:
+            if time >= self._time:  # type: ignore
+                self._active = False
+                return True
+            return False
+        return False
 
     def run(self) -> None:
         self._func()
 
-    def detach(self) -> None:
-        self._detached = True
-
-    def attach(self) -> None:
-        self._detached = False
-
     @property
-    def detached(self) -> bool:
-        return self._detached
+    def is_active(self) -> bool:
+        return self._active
+
+    def __hash__(self) -> int:
+        return super().__hash__()
+
+    def __eq__(self, __o: object) -> bool:
+        return self is __o
 
     def __str__(self) -> str:
         return f'{type(self)}(func={self._func!r}, hook_type={self._event_type!r})'
@@ -102,7 +109,7 @@ def trigger_hooks(
             ret = func(self, *args, **kwargs)
             if reset:
                 for hook in self._hooks:
-                    hook.attach()
+                    hook.reset()
             self._run_hooks()
             return ret
 
@@ -115,11 +122,11 @@ def trigger_hooks(
 
 class InternalClockBase(Generic[T, U], metaclass=ABCMeta):
 
-    _hooks: list[Hook[T]]
+    _hooks: set[Hook[T]]
 
     def _run_hooks(self) -> None:
         def run_hook(hook: Hook[T], time: T) -> None:
-            if hook.detached:
+            if not hook.is_active:
                 return
             if hook.check_hook(time):
                 hook.run()
@@ -128,24 +135,33 @@ class InternalClockBase(Generic[T, U], metaclass=ABCMeta):
             run_hook(hook, self.time)
 
     @overload
-    def add_hook(self, func: Callable[[], None], event_type: Literal['tick']) -> None:
+    def attach(
+        self, func: Callable[[], None], /, *, event_type: Literal['tick']
+    ) -> Hook[T]:
         ...
 
     @overload
-    def add_hook(
-        self, func: Callable[[], None], event_type: Literal['time'], time: T
-    ) -> None:
+    def attach(
+        self, func: Callable[[], None], /, *, event_type: Literal['time'], time: T
+    ) -> Hook[T]:
         ...
 
-    def add_hook(
+    def attach(
         self,
         func: Callable[[], None],
+        /,
+        *,
         event_type: Literal['tick', 'time'],
         time: T | None = None,
-    ) -> None:
+    ) -> Hook[T]:
         if event_type == 'time' and time is None:
             raise ValueError('Must specify time for time-based hook')
-        self._hooks.append(Hook(func=func, event_type=event_type, time=time))
+        hook = Hook(func=func, event_type=event_type, time=time)
+        self._hooks.add(hook)
+        return hook
+
+    def detach(self, hook: Hook) -> None:
+        self._hooks.remove(hook)
 
     @abstractproperty
     def time(self) -> T:
@@ -184,7 +200,7 @@ class NSClock(InternalClockBase[pd.Timestamp, pd.Timedelta], metaclass=ABCMeta):
     _start: pd.Timestamp
     _time: pd.Timestamp
     _incr: pd.Timedelta
-    _hooks: list[Hook[pd.Timestamp]]
+    _hooks: set[Hook[pd.Timestamp]]
 
     def __init__(
         self, /, *, start: pd.Timestamp, incr: pd.Timedelta | None = None
@@ -226,16 +242,13 @@ class NSClock(InternalClockBase[pd.Timestamp, pd.Timedelta], metaclass=ABCMeta):
         self._time = self._start
 
 
-C = TypeVar('C', bound=InternalClockBase)
-
-
-class HasInternalClock(Generic[C], metaclass=ABCMeta):
-    _clock: C
+class HasInternalClock(Generic[TClock], metaclass=ABCMeta):
+    _clock: TClock
 
     @property
-    def clock(self) -> C:
+    def clock(self) -> TClock:
         return self._clock
 
     @clock.setter
-    def clock(self, clock: C) -> None:
+    def clock(self, clock: TClock) -> None:
         self._clock = clock
