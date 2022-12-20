@@ -14,8 +14,8 @@ from typing import TypeVar
 
 import pandas as pd
 
+from merchant.core.clock import ClockHook
 from merchant.core.clock import HasInternalClock
-from merchant.core.clock import Hook
 from merchant.core.clock import NSClock
 from merchant.core.numeric import NormedDecimal
 from merchant.trading.market import MarketSimulation
@@ -111,7 +111,7 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     _benchmarks: dict[Benchmark, tuple[ArgsKwargs, ...]]
     _bound_benchmarks: dict[Benchmark, BoundBenchmark]
 
-    _clock_hook: Hook[pd.Timestamp]
+    _clock_hook: ClockHook
 
     _market: MarketSimulation
     _value_history: pd.Series
@@ -138,9 +138,9 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
                     ) from e
 
         # attach cache invalidation hook to clock
-        self._clock_hook = self._clock.attach(
-            lambda: self._invalidate_cache(), event_type='tick'
-        )
+        hook = ClockHook(lambda: self._invalidate_cache())
+        self._clock_hook = hook
+        self._clock_hook = self._clock.attach(hook=hook)
 
     @property
     def market(self) -> MarketSimulation:

@@ -23,7 +23,6 @@ from merchant.core.observable import run_hooks
 logger = getLogger(__name__)
 
 
-TClock = TypeVar('TClock', bound='InternalClockBase')
 T = TypeVar('T')
 U = TypeVar('U')
 
@@ -56,14 +55,6 @@ class InternalClockBase(Observable, Generic[T, U], metaclass=ABCMeta):
 
     def __repr__(self) -> str:
         return str(self)
-
-
-class ClockHook(AbstractHook[InternalClockBase[T, U]], Generic[T, U]):
-    def __init__(self, func: Callable[[], None]):
-        self._func: Callable[[], None] = func
-
-    def __call__(self, clock: InternalClockBase[T, U]) -> None:
-        self._func()
 
 
 class NSClock(InternalClockBase[pd.Timestamp, pd.Timedelta], metaclass=ABCMeta):
@@ -113,6 +104,17 @@ class NSClock(InternalClockBase[pd.Timestamp, pd.Timedelta], metaclass=ABCMeta):
     def reset(self) -> None:
         logger.debug(f'{self!r}: resetting back to {self._start!r}...')
         self._time = self._start
+
+
+class ClockHook(AbstractHook[NSClock]):
+    def __init__(self, func: Callable[[], None]):
+        self._func: Callable[[], None] = func
+
+    def __call__(self, clock: InternalClockBase) -> None:
+        self._func()
+
+
+TClock = TypeVar('TClock', bound=InternalClockBase)
 
 
 class HasInternalClock(Generic[TClock], metaclass=ABCMeta):
