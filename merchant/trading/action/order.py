@@ -6,20 +6,22 @@ from merchant.core.numeric import NormedDecimal
 from merchant.trading.action.base import Action
 from merchant.trading.action.base import ActionExecution
 from merchant.trading.tools.asset import Asset
-from merchant.trading.tools.direction import TradingDirection
+from merchant.trading.tools.pair import TradingPair
 
 
 class Order(Action):
-    _direction: TradingDirection
+    _pair: TradingPair
     _quantity: NormedDecimal
 
-    def __init__(self, direction: TradingDirection, quantity: Decimal) -> None:
-        self._direction = direction
-        self._quantity = NormedDecimal(quantity, prec=direction.buy.precision)
+    def __init__(self, pair: TradingPair, quantity: Decimal) -> None:
+        if pair.buy is None or pair.sell is None:
+            raise ValueError(f'need a real trading pair, not {pair}')
+        self._pair = pair
+        self._quantity = NormedDecimal(quantity, prec=pair.buy.precision)
 
     @property
-    def direction(self) -> TradingDirection:
-        return self._direction
+    def direction(self) -> TradingPair:
+        return self._pair
 
     @property
     def quantity(self) -> NormedDecimal:

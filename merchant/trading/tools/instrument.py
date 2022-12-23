@@ -4,7 +4,6 @@ from decimal import Decimal
 from logging import getLogger
 
 from merchant.trading.tools.asset import Asset
-from merchant.trading.tools.direction import TradingDirection
 from merchant.trading.tools.pair import TradingPair
 
 
@@ -56,9 +55,6 @@ class Instrument:
         '''allows you to create a 'TradingPair' with A / B'''
         return TradingPair(self, __o)
 
-    def __rtruediv__(self, __o: Instrument | None) -> TradingPair:
-        return TradingPair(__o, self)
-
     def __mul__(self, __o: Decimal) -> Asset:
         '''allows you to create an 'Asset' with A * n'''
         return Asset(self, quantity=__o)
@@ -66,14 +62,6 @@ class Instrument:
     def __rmul__(self, __o: Decimal) -> Asset:
         '''allows you to create an 'Asset' with n * A'''
         return self.__mul__(__o)
-
-    def __gt__(self, __o: Instrument) -> TradingDirection:
-        '''allows you to create a 'TradingDirection' with A > B'''
-        return TradingDirection(self / __o)
-
-    def __lt__(self, __o: Instrument) -> TradingDirection:
-        '''allows you to create a reversed 'TradingDirection' with A < B'''
-        return TradingDirection(self / __o, reversed=True)
 
     def __hash__(self) -> int:
         return hash((self._symbol, self._precision))

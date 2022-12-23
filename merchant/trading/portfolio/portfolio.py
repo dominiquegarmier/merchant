@@ -6,9 +6,9 @@ from abc import ABCMeta
 from collections.abc import Callable
 from collections.abc import Collection
 from decimal import Decimal
-from functools import cache
 from typing import Any
 from typing import Concatenate
+from typing import NewType
 from typing import ParamSpec
 from typing import TypeVar
 
@@ -21,7 +21,11 @@ from merchant.core.numeric import NormedDecimal
 from merchant.trading.market import MarketSimulation
 from merchant.trading.portfolio.benchmarks import Benchmark
 from merchant.trading.portfolio.benchmarks import BoundBenchmark
+from merchant.trading.portfolio.trade import ClosedPosition
+from merchant.trading.portfolio.trade import OpenPositionStack
+from merchant.trading.portfolio.trade import Trade
 from merchant.trading.tools.asset import Asset
+from merchant.trading.tools.asset import Valuation
 from merchant.trading.tools.instrument import Instrument
 
 
@@ -82,7 +86,6 @@ class _StaticPortfolio(metaclass=ABCMeta):
         return str(self)
 
 
-ArgsKwargs = tuple[tuple[Any], dict[str, Any]]
 TPortfolio = TypeVar('TPortfolio', bound='Portfolio')
 P = ParamSpec('P')
 R = TypeVar('R')
@@ -99,6 +102,9 @@ def invalidates_cache(
     return wrapper
 
 
+ArgsKwargs = tuple[tuple[Any], dict[str, Any]]
+
+
 class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     '''
     'Portfolio' represents a trading portfolio, this includes:
@@ -107,14 +113,19 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
         - value and trading history
     '''
 
-    _benchmark_instrument: Instrument
+    _benchmark_instrument: Instrument  # with respect to which instrument the portfolio is valued
     _benchmarks: dict[Benchmark, tuple[ArgsKwargs, ...]]
     _bound_benchmarks: dict[Benchmark, BoundBenchmark]
 
     _clock_hook: ClockHook
 
     _market: MarketSimulation
+
     _value_history: pd.Series
+
+    _trade_history: list[Trade]
+    _open_positions: OpenPositionStack
+    _closed_positions: list[ClosedPosition]
 
     def __init__(
         self, /, *, market: MarketSimulation, assets: Collection[Asset] | None = None
@@ -140,14 +151,14 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
         # attach cache invalidation hook to clock
         hook = ClockHook(lambda: self._invalidate_cache())
         self._clock_hook = hook
-        self._clock_hook = self._clock.attach(hook=hook)
+        self._clock_hook = self.clock.attach(hook=hook)
 
     @property
     def market(self) -> MarketSimulation:
         return self._market
 
     @property
-    def value(self) -> NormedDecimal:
+    def value(self) -> Valuation:
         raise NotImplementedError
 
     @property
@@ -165,3 +176,8 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     def _invalidate_cache(self) -> None:
         for benchmark in self._bound_benchmarks.values():
             benchmark.invalidate_cache()
+
+    def create_histroy(self, trade: Trade) -> None:
+        self._trade_history.append(trade)
+        close_positions = self._open_positions.handle_trade(trade)
+        self._closed_positions.extend(close_positions)
