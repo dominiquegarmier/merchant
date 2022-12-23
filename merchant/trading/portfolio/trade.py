@@ -4,6 +4,7 @@ import pandas as pd
 
 from merchant.core.base import Identifiable
 from merchant.trading.tools.asset import Asset
+from merchant.trading.tools.asset import Valuation
 from merchant.trading.tools.pair import TradingPair
 
 
@@ -24,12 +25,28 @@ class Trade(Identifiable):
         self._sell = sell
 
 
+class ValuedTrade(Trade):
+    # this assumes that the market is efficient and the valuation is the same
+    # on the buy and sell side
+    _valuation: Valuation
+
+    def __init__(
+        self, pair: TradingPair, buy: Asset, sell: Asset, valuation: Valuation
+    ) -> None:
+        super().__init__(pair, buy, sell)
+
+
 class ClosedPosition(Identifiable):
     _amount: Asset
-    _open: Trade
-    _close: Trade
+    _open: ValuedTrade
+    _close: ValuedTrade
 
-    def __init__(self, /, *, amount: Asset, open: Trade, close: Trade) -> None:
+    _open_valuation: Valuation
+    _close_valuation: Valuation
+
+    def __init__(
+        self, /, *, amount: Asset, open: ValuedTrade, close: ValuedTrade
+    ) -> None:
         if amount.instrument != open._pair.buy:
             raise ValueError(f'instrument {amount} does not match open trade {open}')
         if amount.instrument != close._pair.sell:
@@ -37,3 +54,9 @@ class ClosedPosition(Identifiable):
         self._amount = amount
         self._open = open
         self._close = close
+
+        open_ratio = self._amount / open._buy
+        close_ratio = self._amount / close._sell
+
+        self._open_valuation = Valuation(open_ratio * open._valuation)
+        self._close_valuation = Valuation(close_ratio * close._valuation)

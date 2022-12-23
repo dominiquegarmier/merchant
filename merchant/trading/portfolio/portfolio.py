@@ -24,6 +24,7 @@ from merchant.trading.portfolio.benchmarks import Benchmark
 from merchant.trading.portfolio.benchmarks import BoundBenchmark
 from merchant.trading.portfolio.trade import ClosedPosition
 from merchant.trading.portfolio.trade import Trade
+from merchant.trading.portfolio.trade import ValuedTrade
 from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.asset import Valuation
 from merchant.trading.tools.instrument import Instrument
@@ -86,6 +87,47 @@ class _StaticPortfolio(metaclass=ABCMeta):
         return str(self)
 
 
+# buy amount, valuation wrt. benchmark, trade
+TradeTuple = tuple[Asset, ValuedTrade]
+
+
+class _OpenPositionStack:
+    _positions: dict[Instrument, list[TradeTuple]]
+    _benchmark: Instrument  # we don't track positions on the benchmark (since their performance is always trivial)
+
+    def __init__(self, /, *, benchmark: Instrument) -> None:
+        self._positions = defaultdict(list)
+        self._benchmark = benchmark
+
+    def _push(self, trade: ValuedTrade) -> None:
+        trade_tuple: TradeTuple = (trade._buy, 0, trade)  # type: ignore
+        self._positions[trade._buy.instrument].append(trade_tuple)
+
+    def _pop(self, trade: ValuedTrade) -> list[ClosedPosition]:
+        ret: list[ClosedPosition] = []
+        sold_asset = trade._sell
+        while sold_asset > 0:
+            asset, open = self._positions[trade._sell.instrument].pop()
+
+            if sold_asset <= asset:
+                self._positions[trade._sell.instrument].append(
+                    (asset - trade._sell, open)
+                )
+                ret.append(ClosedPosition(amount=trade._sell, open=open, close=trade))
+                continue
+
+            ret.append(ClosedPosition(amount=asset, open=open, close=trade))
+            sold_asset -= asset
+        return ret
+
+    def handle_trade(self, trade: ValuedTrade) -> list[ClosedPosition]:
+        if trade._buy.instrument != self._benchmark:
+            self._push(trade)
+        if trade._sell.instrument != self._benchmark:
+            return self._pop(trade)
+        return []
+
+
 TPortfolio = TypeVar('TPortfolio', bound='Portfolio')
 P = ParamSpec('P')
 R = TypeVar('R')
@@ -100,22 +142,6 @@ def invalidates_cache(
         return func(self, *args, **kwargs)
 
     return wrapper
-
-
-# buy amount, valuation wrt. benchmark, trade
-TradeTuple = tuple[Asset, Valuation, Trade]
-
-
-class _OpenPositionStack:
-    _positions: dict[Instrument, list[TradeTuple]]
-    _benchmark: Instrument  # we don't track positions on the benchmark (since their performance is always trivial)
-
-    def __init__(self, /, *, benchmark: Instrument) -> None:
-        self._positions = defaultdict(list)
-        self._benchmark = benchmark
-
-    def handle_trade(self, trade: Trade) -> list[ClosedPosition]:
-        raise NotImplementedError
 
 
 ArgsKwargs = tuple[tuple[Any], dict[str, Any]]
@@ -193,7 +219,7 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
         for benchmark in self._bound_benchmarks.values():
             benchmark.invalidate_cache()
 
-    def create_histroy(self, trade: Trade) -> None:
+    def _append_trade_to_history(self, trade: ValuedTrade) -> None:
         self._trade_history.append(trade)
-        close_positions = self._open_positions.handle_trade(trade)
-        self._closed_positions.extend(close_positions)
+        closed_positions = self._open_positions.handle_trade(trade)
+        self._closed_positions.extend(closed_positions)
