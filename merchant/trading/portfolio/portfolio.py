@@ -22,7 +22,24 @@ from merchant.core.clock import NSClock
 from merchant.core.numeric import NormedDecimal
 from merchant.trading.market import MarketSimulation
 from merchant.trading.portfolio.benchmarks import Benchmark
+from merchant.trading.portfolio.benchmarks import BETA
 from merchant.trading.portfolio.benchmarks import BoundBenchmark
+from merchant.trading.portfolio.benchmarks import CALMAR_RATIO
+from merchant.trading.portfolio.benchmarks import COMPOUND_ANNUAL_GROWTH_RATE
+from merchant.trading.portfolio.benchmarks import GAIN_TO_PAIN_RATIO
+from merchant.trading.portfolio.benchmarks import INFORMATION_RATIO
+from merchant.trading.portfolio.benchmarks import JENSEN_ALPHA
+from merchant.trading.portfolio.benchmarks import KELLY_CRITERION
+from merchant.trading.portfolio.benchmarks import MAX_DRAWDOWN_RATIO
+from merchant.trading.portfolio.benchmarks import ROLLING_BETA
+from merchant.trading.portfolio.benchmarks import ROLLING_SHARPE_RATIO
+from merchant.trading.portfolio.benchmarks import ROLLING_SORTINO_RATIO
+from merchant.trading.portfolio.benchmarks import ROLLING_VOLATILITY
+from merchant.trading.portfolio.benchmarks import SHARPE_RATIO
+from merchant.trading.portfolio.benchmarks import SORTINO_RATIO
+from merchant.trading.portfolio.benchmarks import TRACKING_ERROR
+from merchant.trading.portfolio.benchmarks import TREYNOR_RATIO
+from merchant.trading.portfolio.benchmarks import VOLATILITY
 from merchant.trading.portfolio.trade import ClosedPosition
 from merchant.trading.portfolio.trade import Trade
 from merchant.trading.portfolio.trade import ValuedTrade
@@ -30,6 +47,26 @@ from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.asset import Valuation
 from merchant.trading.tools.instrument import Instrument
 from merchant.trading.tools.instrument import USD
+
+DEFAULT_BENCHMARKS: dict[Benchmark, ArgsKwargs | None] = {
+    VOLATILITY: None,
+    ROLLING_VOLATILITY: None,
+    SHARPE_RATIO: None,
+    ROLLING_SHARPE_RATIO: None,
+    SORTINO_RATIO: None,
+    ROLLING_SORTINO_RATIO: None,
+    BETA: None,
+    ROLLING_BETA: None,
+    MAX_DRAWDOWN_RATIO: None,
+    GAIN_TO_PAIN_RATIO: None,
+    JENSEN_ALPHA: None,
+    CALMAR_RATIO: None,
+    KELLY_CRITERION: None,
+    TRACKING_ERROR: None,
+    INFORMATION_RATIO: None,
+    TREYNOR_RATIO: None,
+    COMPOUND_ANNUAL_GROWTH_RATE: None,
+}
 
 
 class _StaticPortfolio(Identifiable, metaclass=ABCMeta):
@@ -146,6 +183,27 @@ def invalidates_cache(
     return wrapper
 
 
+FnCache = dict[int, Any]
+
+
+def iv_cached(
+    func: Callable[Concatenate[TPortfolio, P], R]
+) -> Callable[Concatenate[TPortfolio, P], R]:
+    fn_key = hash(func)
+
+    @functools.wraps(func)
+    def wrapper(self: TPortfolio, *args: P.args, **kwargs: P.kwargs) -> R:
+        if fn_key not in self._cache:
+            self._cache[fn_key] = {}
+
+        key = hash(args + tuple(kwargs.items()))
+        if key not in self._cache[fn_key]:
+            self._cache[fn_key][key] = func(self, *args, **kwargs)
+        return self._cache[fn_key][key]  # type: ignore
+
+    return wrapper
+
+
 ArgsKwargs = tuple[tuple[Any], dict[str, Any]]
 
 
@@ -158,16 +216,15 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     '''
 
     _valuation: Instrument  # with respect to which instrument the portfolio is valued
-    _benchmarks: dict[Benchmark, tuple[ArgsKwargs, ...]]
+    _benchmarks: dict[Benchmark, ArgsKwargs | None] = DEFAULT_BENCHMARKS
     _bound_benchmarks: dict[Benchmark, BoundBenchmark]
-    _value_cache: Valuation | None
 
+    _cache: dict[int, FnCache]  # cache that is invalidated on every step
     _clock_hook: ClockHook
-
     _market: MarketSimulation
 
     _open_positions: _OpenPositionStack
-    _value_history: pd.Series
+    _value_history: pd.Series  # values are stored as floats
     _trade_history: list[Trade]
     _position_histroy: list[ClosedPosition]
 
@@ -190,35 +247,67 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
             self._bound_benchmarks[benchmark] = bound_benchmark
             # check types
             sig = inspect.signature(bound_benchmark)
-            for args, kwargs in arg_tuple:
-                try:
-                    sig.bind(*args, **kwargs)
-                except TypeError as e:
-                    raise TypeError(
-                        f'Invalid arguments for {benchmark!r} bound to {self!r}'
-                    ) from e
+
+            if arg_tuple is None:
+                args: tuple = ()
+                kwargs: dict[str, Any] = {}
+            else:
+                args, kwargs = arg_tuple
+
+            try:
+                sig.bind(*args, **kwargs)
+            except TypeError as e:
+                raise TypeError(
+                    f'Invalid arguments for {benchmark!r} bound to {self!r}'
+                ) from e
 
         # attach _step to clock
         hook = ClockHook(lambda: self._step())
         self._clock_hook = hook
         self._clock_hook = self.clock.attach(hook=hook)
 
-    def _get_obs(self) -> Any:
-        raise NotImplementedError
-
-    def _step(self) -> None:
-        _ = self._get_obs()
+    def _step(
+        self,
+    ) -> None:
+        # trigger atleast once per step
+        self._update_history()
         self._invalidate_caches()
 
-    @property
-    def market(self) -> MarketSimulation:
-        return self._market
+    def _update_history(self) -> None:
+        current_ts = self.clock.time
+        if current_ts not in self._value_history:
+            self._value_history[current_ts] = float(self.value)
+
+    def _invalidate_caches(self) -> None:
+        self._value_cache = None
+        for benchmark in self._bound_benchmarks.values():
+            benchmark.invalidate_cache()
+        for ch in self._cache.values():
+            ch.clear()
 
     @property
+    @iv_cached
     def value(self) -> Valuation:
-        if self._value_cache is None:
-            raise NotImplementedError
-        return self._value_cache
+        raise NotImplementedError
+
+    @property
+    def value_history(self) -> pd.Series:
+        self._update_history()
+        return self._value_history
+
+    @property
+    @iv_cached
+    def trade_history(self) -> tuple[Trade, ...]:
+        return tuple(self._trade_history)
+
+    @property
+    def position_history(self) -> tuple[ClosedPosition, ...]:
+        return tuple(self._position_histroy)
+
+    def _append_trade_to_history(self, trade: ValuedTrade) -> None:
+        self._trade_history.append(trade)
+        closed_positions = self._open_positions.handle_trade(trade)
+        self._position_histroy.extend(closed_positions)
 
     @property
     def valuation(self) -> Instrument:
@@ -229,26 +318,8 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
         return tuple(self._benchmarks.keys())
 
     @property
-    def trade_history(self) -> tuple[Trade, ...]:
-        return tuple(self._trade_history)
-
-    @property
-    def value_history(self) -> pd.Series:
-        return self._value_history
-
-    @property
-    def position_history(self) -> tuple[ClosedPosition, ...]:
-        return tuple(self._position_histroy)
-
-    def _invalidate_caches(self) -> None:
-        self._value_cache = None
-        for benchmark in self._bound_benchmarks.values():
-            benchmark.invalidate_cache()
-
-    def _append_trade_to_history(self, trade: ValuedTrade) -> None:
-        self._trade_history.append(trade)
-        closed_positions = self._open_positions.handle_trade(trade)
-        self._position_histroy.extend(closed_positions)
+    def market(self) -> MarketSimulation:
+        return self._market
 
     # add cache invalidation to all mutating methods
     @invalidates_cache
