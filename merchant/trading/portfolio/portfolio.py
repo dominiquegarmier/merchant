@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import inspect
 from abc import ABCMeta
+from collections import defaultdict
 from collections.abc import Callable
 from collections.abc import Collection
 from decimal import Decimal
@@ -22,7 +23,6 @@ from merchant.trading.market import MarketSimulation
 from merchant.trading.portfolio.benchmarks import Benchmark
 from merchant.trading.portfolio.benchmarks import BoundBenchmark
 from merchant.trading.portfolio.trade import ClosedPosition
-from merchant.trading.portfolio.trade import OpenPositionStack
 from merchant.trading.portfolio.trade import Trade
 from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.asset import Valuation
@@ -102,6 +102,22 @@ def invalidates_cache(
     return wrapper
 
 
+# buy amount, valuation wrt. benchmark, trade
+TradeTuple = tuple[Asset, Valuation, Trade]
+
+
+class _OpenPositionStack:
+    _positions: dict[Instrument, list[TradeTuple]]
+    _benchmark: Instrument  # we don't track positions on the benchmark (since their performance is always trivial)
+
+    def __init__(self, /, *, benchmark: Instrument) -> None:
+        self._positions = defaultdict(list)
+        self._benchmark = benchmark
+
+    def handle_trade(self, trade: Trade) -> list[ClosedPosition]:
+        raise NotImplementedError
+
+
 ArgsKwargs = tuple[tuple[Any], dict[str, Any]]
 
 
@@ -124,7 +140,7 @@ class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     _value_history: pd.Series
 
     _trade_history: list[Trade]
-    _open_positions: OpenPositionStack
+    _open_positions: _OpenPositionStack
     _closed_positions: list[ClosedPosition]
 
     def __init__(
