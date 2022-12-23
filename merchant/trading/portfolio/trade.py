@@ -1,91 +1,62 @@
 from __future__ import annotations
 
-from abc import ABCMeta
-from abc import abstractproperty
-from typing import Literal
-
 import pandas as pd
 
-from merchant.trading.tools.instrument import Instrument
+from merchant.core.base import Identifiable
+from merchant.trading.tools.asset import Asset
+from merchant.trading.tools.asset import Valuation
+from merchant.trading.tools.pair import TradingPair
 
 
-class _Base(metaclass=ABCMeta):
-    _instrument: Instrument
-    _benchmark: Instrument
-    _open: pd.Timestamp
+class Trade(Identifiable):
+    _buy: Asset
+    _sell: Asset
+    _time: pd.Timestamp
+    _pair: TradingPair
 
-    def __init__(self, instrument: Instrument, /, *, benchmark: Instrument) -> None:
-        raise NotImplementedError
+    def __init__(self, pair: TradingPair, buy: Asset, sell: Asset) -> None:
+        if pair.buy != buy.instrument:
+            raise ValueError(f'buy asset {buy} does not match direction {pair}')
+        if pair.sell != sell.instrument:
+            raise ValueError(f'sell asset {sell} does not match direction {pair}')
 
-    @abstractproperty
-    def is_open(self) -> bool:
-        ...
-
-    @abstractproperty
-    def is_closed(self) -> bool:
-        ...
-
-    @property
-    def instrument(self) -> Instrument:
-        '''get the instrument'''
-        return self._instrument
-
-    @property
-    def benchmark(self) -> Instrument:
-        '''get the benchmark'''
-        return self._benchmark
-
-    def __str__(self) -> str:
-        return f'{type(self)}(instrument={self.instrument}, benchmark={self.benchmark}, ...)'
-
-    def __repr__(self) -> str:
-        return str(self)
+        self._pair = pair
+        self._buy = buy
+        self._sell = sell
 
 
-class Position(_Base):
-    '''
-    a 'Position' is an open 'Trade'
-    '''
+class ValuedTrade(Trade):
+    # this assumes that the market is efficient and the valuation is the same
+    # on the buy and sell side
+    _valuation: Valuation
 
-    @property
-    def is_open(self) -> Literal[True]:
-        return True
-
-    @property
-    def is_closed(self) -> Literal[False]:
-        return False
-
-    def close(self, close: pd.Timestamp) -> Trade:
-        '''close the position'''
-        return Trade(self.instrument, benchmark=self.benchmark)
+    def __init__(
+        self, pair: TradingPair, buy: Asset, sell: Asset, valuation: Valuation
+    ) -> None:
+        super().__init__(pair, buy, sell)
 
 
-class Trade(_Base):
-    '''
-    a 'Trade' consists of two consecutive successful market orders
-    (one at the start, one at the end of the trade period).
-    It is implicitly assumed that after each 'Trade' the whole asset is liquidated
-    (and potentially reacquired (partially)).
-    '''
+class ClosedPosition(Identifiable):
+    _amount: Asset
+    _open: ValuedTrade
+    _close: ValuedTrade
 
-    _close: pd.Timestamp
+    _open_valuation: Valuation
+    _close_valuation: Valuation
 
-    def __init__(self, instrument: Instrument, /, *, benchmark: Instrument) -> None:
-        super().__init__(instrument, benchmark=benchmark)
-        raise NotImplementedError
+    def __init__(
+        self, /, *, amount: Asset, open: ValuedTrade, close: ValuedTrade
+    ) -> None:
+        if amount.instrument != open._pair.buy:
+            raise ValueError(f'instrument {amount} does not match open trade {open}')
+        if amount.instrument != close._pair.sell:
+            raise ValueError(f'instrument {amount} does not match close trade {close}')
+        self._amount = amount
+        self._open = open
+        self._close = close
 
-    @property
-    def is_open(self) -> Literal[False]:
-        return False
+        open_ratio = self._amount / open._buy
+        close_ratio = self._amount / close._sell
 
-    @property
-    def is_closed(self) -> Literal[True]:
-        return True
-
-    @property
-    def open(self) -> pd.Timestamp:
-        return self._open
-
-    @property
-    def close(self) -> pd.Timestamp:
-        return self._close
+        self._open_valuation = Valuation(open_ratio * open._valuation)
+        self._close_valuation = Valuation(close_ratio * close._valuation)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 from functools import total_ordering
+from typing import NewType
+from typing import overload
 
 from merchant.core.numeric import NormedDecimal
 from merchant.trading.tools.instrument import Instrument
@@ -70,8 +72,29 @@ class Asset:
     def __rmul__(self, __o: Decimal) -> Asset:
         return self.__mul__(__o)
 
+    @overload
+    def __truediv__(self, __o: Asset) -> Decimal:
+        ...
+
+    @overload
+    def __truediv__(self, __o: Decimal) -> Asset:
+        ...
+
+    def __truediv__(self, __o: Asset | Decimal) -> Decimal | Asset:
+        if isinstance(__o, Decimal):
+            return Asset(self._instrument, quantity=self._quantity / __o)
+        if self._instrument != __o._instrument:
+            raise TypeError(f'cannot divide {self} with {__o}: different instruments')
+        if __o._quantity == 0:
+            raise ZeroDivisionError(f'cannot divide {self} by {__o}')
+        return self._quantity / __o._quantity
+
     def __str__(self) -> str:
         return f'{self._quantity:.{self._precision}} {self._instrument}'
 
     def __repr__(self) -> str:
         return str(self)
+
+
+# representing the value of another asset wrt. a given benchmark instrument
+Valuation = NewType('Valuation', Asset)

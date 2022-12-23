@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import functools
 from abc import ABCMeta
 from abc import abstractmethod
 from abc import abstractproperty
 from collections.abc import Callable
 from logging import getLogger
-from typing import Concatenate
 from typing import Generic
-from typing import Literal
-from typing import overload
-from typing import ParamSpec
 from typing import TypeVar
 
 import pandas as pd
@@ -27,7 +22,7 @@ T = TypeVar('T')
 U = TypeVar('U')
 
 
-class InternalClockBase(Observable, Generic[T, U], metaclass=ABCMeta):
+class AbstractClock(Observable, Generic[T, U], metaclass=ABCMeta):
     @abstractproperty
     def time(self) -> T:
         ...
@@ -57,7 +52,7 @@ class InternalClockBase(Observable, Generic[T, U], metaclass=ABCMeta):
         return str(self)
 
 
-class NSClock(InternalClockBase[pd.Timestamp, pd.Timedelta], metaclass=ABCMeta):
+class NSClock(AbstractClock[pd.Timestamp, pd.Timedelta]):
     '''
     clock object that
     '''
@@ -110,11 +105,11 @@ class ClockHook(AbstractHook[NSClock]):
     def __init__(self, func: Callable[[], None]):
         self._func: Callable[[], None] = func
 
-    def __call__(self, clock: InternalClockBase) -> None:
+    def __call__(self, clock: AbstractClock) -> None:
         self._func()
 
 
-TClock = TypeVar('TClock', bound=InternalClockBase)
+TClock = TypeVar('TClock', bound=AbstractClock)
 
 
 class HasInternalClock(Generic[TClock], metaclass=ABCMeta):

@@ -12,6 +12,7 @@ from merchant.trading.action.order import OrderExecution
 from merchant.trading.portfolio import Portfolio
 from merchant.trading.tools.instrument import Instrument
 from merchant.trading.tools.pair import TradingPair
+from merchant.trading.tools.pair import VirtualTradingPair
 
 
 class Market:
@@ -29,12 +30,6 @@ class Market:
         self._sell = {}
 
         for p in pairs:
-            if p.is_virtual:
-                raise TypeError(f'cannot add {p} to {self}: virtual trading pair')
-
-            assert p._buy is not None
-            assert p._sell is not None
-
             if p._buy not in self._buy:
                 self._buy[p._buy] = set()
             self._buy[p._buy].add(p)
@@ -53,19 +48,15 @@ class Market:
 
     def __getitem__(
         self,
-        __o: Instrument | TradingPair,
+        __o: Instrument | VirtualTradingPair,
     ) -> set[TradingPair]:
         '''get the trading pairs for an instrument'''
-        if isinstance(__o, TradingPair):
-            if not __o.is_virtual:
-                raise TypeError(
-                    f'cannot get trading pairs for {__o}: not a virtual trading pair'
-                )
+        if isinstance(__o, VirtualTradingPair):
             if __o._sell is not None:
                 return self._sell[__o._sell]
             if __o._buy is not None:
                 return self._buy[__o._buy]
-            assert False, 'unreachable'
+            raise KeyError(f'invalid virtual trading pair {__o} in {self}')
 
         if __o in self._instruments:
             return self._buy[__o] | self._sell[__o]

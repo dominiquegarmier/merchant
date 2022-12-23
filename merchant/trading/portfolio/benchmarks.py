@@ -3,23 +3,14 @@ from __future__ import annotations
 from abc import ABCMeta
 from abc import abstractmethod
 from collections.abc import Callable
-from collections.abc import Hashable
-from collections.abc import Sequence
 from functools import wraps
 from typing import Any
 from typing import Concatenate
-from typing import Generic
-from typing import Literal
 from typing import NewType
-from typing import overload
 from typing import ParamSpec
-from typing import TYPE_CHECKING
 from typing import TypeVar
 
-import pandas as pd
-
 from merchant.trading.portfolio.portfolio import Portfolio
-from merchant.trading.portfolio.trade import Trade
 
 
 P = ParamSpec('P')

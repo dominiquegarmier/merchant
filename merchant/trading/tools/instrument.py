@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 from logging import getLogger
+from typing import overload
 
 from merchant.trading.tools.asset import Asset
-from merchant.trading.tools.direction import TradingDirection
 from merchant.trading.tools.pair import TradingPair
+from merchant.trading.tools.pair import VirtualTradingPair
 
 
 logger = getLogger(__name__)
@@ -52,11 +53,32 @@ class Instrument:
     def description(self) -> str:
         return self._description
 
-    def __truediv__(self, __o: Instrument | None) -> TradingPair:
+    @overload
+    def __truediv__(self, __o: None) -> VirtualTradingPair:
+        ...
+
+    @overload
+    def __truediv__(self, __o: Instrument) -> TradingPair:
+        ...
+
+    def __truediv__(self, __o: Instrument | None) -> TradingPair | VirtualTradingPair:
         '''allows you to create a 'TradingPair' with A / B'''
+        if __o is None:
+            return VirtualTradingPair(self, __o)
         return TradingPair(self, __o)
 
-    def __rtruediv__(self, __o: Instrument | None) -> TradingPair:
+    @overload
+    def __rtruediv__(self, __o: None) -> VirtualTradingPair:
+        ...
+
+    @overload
+    def __rtruediv__(self, __o: Instrument) -> TradingPair:
+        ...
+
+    def __rtruediv__(self, __o: Instrument | None) -> TradingPair | VirtualTradingPair:
+        '''allows you to create a 'TradingPair' with B / A'''
+        if __o is None:
+            return VirtualTradingPair(__o, self)
         return TradingPair(__o, self)
 
     def __mul__(self, __o: Decimal) -> Asset:
@@ -66,14 +88,6 @@ class Instrument:
     def __rmul__(self, __o: Decimal) -> Asset:
         '''allows you to create an 'Asset' with n * A'''
         return self.__mul__(__o)
-
-    def __gt__(self, __o: Instrument) -> TradingDirection:
-        '''allows you to create a 'TradingDirection' with A > B'''
-        return TradingDirection(self / __o)
-
-    def __lt__(self, __o: Instrument) -> TradingDirection:
-        '''allows you to create a reversed 'TradingDirection' with A < B'''
-        return TradingDirection(self / __o, reversed=True)
 
     def __hash__(self) -> int:
         return hash((self._symbol, self._precision))
