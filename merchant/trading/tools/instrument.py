@@ -34,7 +34,10 @@ class Instrument:
         if not isinstance(__o, Instrument):
             return False
         if (self._symbol, self._precision) != (__o._symbol, __o._precision):
-            if self._description != __o._description:
+            if (
+                all((self._description, __o._description))
+                and self._description != __o._description
+            ):
                 logger.warning(
                     f'two instruments have the same symbol and precision but different descriptions: {self._symbol}'
                 )
@@ -90,7 +93,7 @@ class Instrument:
         return self.__mul__(__o)
 
     def __hash__(self) -> int:
-        return hash((self._symbol, self._precision))
+        return hash((type(self), self._symbol, self._precision))
 
     def __str__(self) -> str:
         return f'{type(self)}(symbol={self._symbol}, precision={self._precision})'
