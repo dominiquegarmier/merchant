@@ -20,7 +20,7 @@ from merchant.core.clock import ClockHook
 from merchant.core.clock import HasInternalClock
 from merchant.core.clock import NSClock
 from merchant.core.numeric import NormedDecimal
-from merchant.trading.market import MarketSimulation
+from merchant.trading.broker import MarketSimulation
 from merchant.trading.portfolio.benchmarks import Benchmark
 from merchant.trading.portfolio.benchmarks import BETA
 from merchant.trading.portfolio.benchmarks import BoundBenchmark
