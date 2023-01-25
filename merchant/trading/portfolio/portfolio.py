@@ -20,10 +20,8 @@ from merchant.core.clock import ClockHook
 from merchant.core.clock import HasInternalClock
 from merchant.core.clock import NSClock
 from merchant.core.numeric import NormedDecimal
-from merchant.trading.broker import MarketSimulation
 from merchant.trading.portfolio.benchmarks import Benchmark
 from merchant.trading.portfolio.benchmarks import BETA
-from merchant.trading.portfolio.benchmarks import BoundBenchmark
 from merchant.trading.portfolio.benchmarks import CALMAR_RATIO
 from merchant.trading.portfolio.benchmarks import COMPOUND_ANNUAL_GROWTH_RATE
 from merchant.trading.portfolio.benchmarks import GAIN_TO_PAIN_RATIO
