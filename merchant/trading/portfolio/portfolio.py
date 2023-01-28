@@ -16,9 +16,6 @@ from typing import TypeVar
 import pandas as pd
 
 from merchant.core.base import Identifiable
-from merchant.core.clock import ClockHook
-from merchant.core.clock import HasInternalClock
-from merchant.core.clock import NSClock
 from merchant.core.numeric import NormedDecimal
 from merchant.trading.portfolio.benchmarks import Benchmark
 from merchant.trading.portfolio.benchmarks import BETA
@@ -46,6 +43,7 @@ from merchant.trading.tools.asset import Valuation
 from merchant.trading.tools.instrument import Instrument
 from merchant.trading.tools.instrument import USD
 
+
 DEFAULT_BENCHMARKS: dict[Benchmark, ArgsKwargs | None] = {
     VOLATILITY: None,
     ROLLING_VOLATILITY: None,
@@ -65,6 +63,19 @@ DEFAULT_BENCHMARKS: dict[Benchmark, ArgsKwargs | None] = {
     TREYNOR_RATIO: None,
     COMPOUND_ANNUAL_GROWTH_RATE: None,
 }
+
+
+class Portfolio:
+    _assets: dict[Instrument, Asset]
+    _open_positions: Any
+
+    @property
+    def assets(self) -> dict[Instrument, Asset]:
+        return self._assets
+
+    @property
+    def positons(self) -> Any:
+        return self._open_positions
 
 
 class _StaticPortfolio(Identifiable, metaclass=ABCMeta):
@@ -205,7 +216,7 @@ def iv_cached(
 ArgsKwargs = tuple[tuple[Any], dict[str, Any]]
 
 
-class Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
+class _Portfolio(HasInternalClock[NSClock], _StaticPortfolio):
     '''
     'Portfolio' represents a trading portfolio, this includes:
         - the current state of the portfolio

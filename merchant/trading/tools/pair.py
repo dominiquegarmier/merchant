@@ -52,6 +52,9 @@ class _TradingPair(metaclass=ABCMeta):
     def __hash__(self) -> int:
         return hash((type(self), self._buy, self._sell))
 
+    def __str__(self) -> str:
+        return f'{self._buy}/{self._sell}'
+
     def __repr__(self) -> str:
         return f'{type(self)}(buy={self._buy!r}, sell={self._sell!r})'
 
