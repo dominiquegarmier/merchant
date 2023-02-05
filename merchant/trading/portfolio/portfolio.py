@@ -42,6 +42,7 @@ from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.asset import Valuation
 from merchant.trading.tools.instrument import Instrument
 from merchant.trading.tools.instrument import USD
+from merchant.core.clock import TimeDependant
 
 
 DEFAULT_BENCHMARKS: dict[Benchmark, ArgsKwargs | None] = {
@@ -65,17 +66,26 @@ DEFAULT_BENCHMARKS: dict[Benchmark, ArgsKwargs | None] = {
 }
 
 
-class Portfolio:
+class Portfolio(TimeDependant):
     _assets: dict[Instrument, Asset]
-    _open_positions: Any
+    _value: Valuation | None
+    _history: Any
+    _money_instrument: Instrument
+
+    def __init__(
+        self, assets: Collection[Asset], money_instrument: Instrument = USD
+    ) -> None:
+        self._assets = {asset.instrument: asset for asset in assets}
+        self._money_instrument = money_instrument
+        self._value = None
 
     @property
     def assets(self) -> dict[Instrument, Asset]:
         return self._assets
 
     @property
-    def positons(self) -> Any:
-        return self._open_positions
+    def value(self) -> Valuation:
+        raise NotImplementedError
 
 
 class _StaticPortfolio(Identifiable, metaclass=ABCMeta):

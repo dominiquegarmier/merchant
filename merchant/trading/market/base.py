@@ -69,5 +69,5 @@ class BaseBroker(TimeDependant, metaclass=ABCMeta):
         ...
 
     @abstractmethod
-    def get_portfolio(self) -> Portfolio:
+    def update_portfolio(self) -> Portfolio:
         ...

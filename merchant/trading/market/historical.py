@@ -5,7 +5,7 @@ from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
-from typing import TypeAlias
+from typing import TypeAlias, Collection
 
 import pandas as pd
 from pyarrow import dataset as ds
@@ -17,6 +17,8 @@ from merchant.trading.market.base import Order
 from merchant.trading.market.base import OrderExecution
 from merchant.trading.market.base import Quote
 from merchant.trading.tools.pair import TradingPair
+from merchant.trading.portfolio import Portfolio
+from merchant.trading.tools.asset import Asset
 
 
 SUPPORTED_AGGREGATES = ['1s', '1min', '5min', '15min', '30min', '1h', '1d', '1w', '1m']
@@ -36,24 +38,30 @@ class Dataset:
 
 
 class HistoricalBroker(BaseBroker):
-    def __init__(self) -> None:
+    def __init__(self, dataset: Dataset, assets: Collection[Asset]) -> None:
         super().__init__()
+        self._dataset = dataset
+        self._portfolio = Portfolio(assets=assets)
+
+    def update_portfolio(self) -> Portfolio:
+        '''update value of portfolio and record history'''
+        raise NotImplementedError
+        return self._portfolio
 
 
 class HistoricalMarketData(BaseMarketData):
     _dataset: Dataset
+    _portfolio: Portfolio
 
     def __init__(self, dataset: Dataset) -> None:
         super().__init__()
-
-        # TODO: handle time from internal clock
-        time = self.clock.time
         self._dataset = dataset
 
     def get_quote(self, pair: TradingPair) -> Quote:
         quote = _get_context_consistent_quote(
-            self._dataset, pair, self.clock.time, rel_time=0
+            self._dataset, timestamp=self.clock.time, pair=pair
         )
+        return Quote(pair=pair, rate=quote, time=self.clock.time)
 
 
 _TCandle: TypeAlias = tuple[int, int, float, float, float, float, float]
@@ -101,7 +109,7 @@ def _get_rolling_window_cached(
     ):
         _CACHED_WINDOW = _get_window_slice(timestamp)
         _CACHED_WINDOW_SLICE = dataset[
-            _CACHED_WINDOW[0] : _CACHED_WINDOW[1]  # noqa: E203
+            _CACHED_WINDOW[0].value : _CACHED_WINDOW[1].value  # noqa: E203
         ]
     return _CACHED_WINDOW_SLICE
 
