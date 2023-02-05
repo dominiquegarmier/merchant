@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from abc import ABCMeta
 from typing import overload
+from typing import TYPE_CHECKING
+from typing import TypeVar
 
-from merchant.trading.tools.instrument import Instrument
+
+if TYPE_CHECKING:
+    from merchant.trading.tools.instrument import Instrument
+
+
+T = TypeVar('T', bound='_TradingPair')
 
 
 class _TradingPair(metaclass=ABCMeta):
@@ -30,8 +37,6 @@ class _TradingPair(metaclass=ABCMeta):
         return self._sell
 
     def __contains__(self, __o: object) -> bool:
-        if not isinstance(__o, Instrument):
-            return False
         return __o in (self._buy, self._sell)
 
     def __eq__(self, __o: object) -> bool:
@@ -41,8 +46,14 @@ class _TradingPair(metaclass=ABCMeta):
             return False
         return True
 
+    def __invert__(self: T) -> T:
+        return type(self)(self._sell, self._buy)
+
     def __hash__(self) -> int:
-        return hash((self._buy, self._sell))
+        return hash((type(self), self._buy, self._sell))
+
+    def __str__(self) -> str:
+        return f'{self._buy}/{self._sell}'
 
     def __repr__(self) -> str:
         return f'{type(self)}(buy={self._buy!r}, sell={self._sell!r})'

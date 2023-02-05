@@ -4,9 +4,12 @@ from decimal import Decimal
 from functools import total_ordering
 from typing import NewType
 from typing import overload
+from typing import TYPE_CHECKING
 
 from merchant.core.numeric import NormedDecimal
-from merchant.trading.tools.instrument import Instrument
+
+if TYPE_CHECKING:
+    from merchant.trading.tools.instrument import Instrument
 
 
 @total_ordering
@@ -37,7 +40,7 @@ class Asset:
         return float(self._quantity)
 
     def __hash__(self) -> int:
-        return hash((self._instrument, self._quantity))
+        return hash((type(self), self._instrument, self._quantity))
 
     def __eq__(self, __o: object) -> bool:
         if not isinstance(__o, Asset):

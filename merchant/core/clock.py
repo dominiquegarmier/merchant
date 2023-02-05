@@ -2,123 +2,126 @@ from __future__ import annotations
 
 from abc import ABCMeta
 from abc import abstractmethod
-from abc import abstractproperty
-from collections.abc import Callable
 from logging import getLogger
-from typing import Generic
-from typing import TypeVar
+from types import TracebackType
 
 import pandas as pd
-
-from merchant.core.observable import AbstractHook
-from merchant.core.observable import Observable
-from merchant.core.observable import reset_hooks
-from merchant.core.observable import run_hooks
 
 logger = getLogger(__name__)
 
 
-T = TypeVar('T')
-U = TypeVar('U')
-
-
-class AbstractClock(Observable, Generic[T, U], metaclass=ABCMeta):
-    @abstractproperty
-    def time(self) -> T:
-        ...
-
-    @abstractmethod
-    @reset_hooks
-    def reset(self) -> None:
-        ...
-
-    @abstractproperty
-    def increment(self) -> U:
-        ...
-
-    @increment.setter
-    def increment(self, incr: U) -> None:
-        ...
-
-    @abstractmethod
-    @run_hooks
-    def step(self, /, *, to: T | None = None, incr: U | None = None) -> None:
-        ...
-
-    def __str__(self) -> str:
-        return f'<{type(self)}: time={self.time!r}, increment={self.increment!r}>'
-
-    def __repr__(self) -> str:
-        return str(self)
-
-
-class NSClock(AbstractClock[pd.Timestamp, pd.Timedelta]):
+class Clock(metaclass=ABCMeta):
     '''
-    clock object that
+    attributes:
+        - time: the current time
+        - started_at: the time the clock was started
+        - stopped_at: the time the clock was stopped
     '''
 
-    _start: pd.Timestamp
-    _time: pd.Timestamp
-    _incr: pd.Timedelta
+    _stopped: bool = False
 
-    def __init__(
-        self, /, *, start: pd.Timestamp, incr: pd.Timedelta | None = None
-    ) -> None:
-        self._start = start
-        self._time = start
-        if incr is None:
-            incr = pd.Timedelta(1, unit='s')
-        self._incr = incr
+    _started_at: pd.Timestamp
+    _stopped_at: None | pd.Timestamp = None
+
+    def __init__(self) -> None:
+        self._started_at = self._time()
 
     @property
     def time(self) -> pd.Timestamp:
-        return self._time
+        if self._stopped is not None:
+            return self._stopped_at  # type: ignore
+        return self._get_time()
 
     @property
-    def increment(self) -> pd.Timedelta:
-        return self._incr
-
-    @increment.setter
-    def increment(self, incr: pd.Timedelta) -> None:
-        self._incr = incr
-
-    @run_hooks
-    def step(
-        self, incr: pd.Timedelta | None = None, to: pd.Timestamp | None = None
-    ) -> None:
-        if to is not None and incr is not None:
-            raise ValueError('Cannot specify both `to` and `incr`')
-        if to is not None:
-            logger.debug(f'{self!r}: stepping to {to!r}...')
-            self._time = to
-        else:
-            logger.debug(f'{self!r}: stepping increment: {incr or self._incr!r}...')
-            self._time += incr or self._incr
-
-    @reset_hooks
-    def reset(self) -> None:
-        logger.debug(f'{self!r}: resetting back to {self._start!r}...')
-        self._time = self._start
-
-
-class ClockHook(AbstractHook[NSClock]):
-    def __init__(self, func: Callable[[], None]):
-        self._func: Callable[[], None] = func
-
-    def __call__(self, clock: AbstractClock) -> None:
-        self._func()
-
-
-TClock = TypeVar('TClock', bound=AbstractClock)
-
-
-class HasInternalClock(Generic[TClock], metaclass=ABCMeta):
-    _clock: TClock
+    def started_at(self) -> pd.Timestamp:
+        return self._started_at
 
     @property
-    def clock(self) -> TClock:
+    def stopped_at(self) -> None | pd.Timestamp:
+        return self._stopped_at
+
+    @property
+    def stopped(self) -> bool:
+        return self._stopped
+
+    @abstractmethod
+    def _time(self) -> pd.Timestamp:
+        ...
+
+    def __enter__(self) -> Clock:
+        global _CONTEXT_CLOCK
+        if _CONTEXT_CLOCK is not None:
+            raise RuntimeError('Clock context already entered')
+        _CONTEXT_CLOCK = self
+        return self
+
+    def __exit__(
+        self,
+        tp: type[BaseException] | None,
+        inst: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
+        # mark the clock as stopped
+        self._stopped_at = self.time
+        self._stopped = True
+
+        # remove the clock from the context
+        global _CONTEXT_CLOCK
+        _CONTEXT_CLOCK = None
+        return None
+
+
+class RealClock(Clock):
+    '''
+    clock that proxies pd.Timestamp.now()
+    use this for real time trading
+    '''
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def _time(self) -> pd.Timestamp:
+        return pd.Timestamp.now()
+
+
+class VirutalClock(Clock):
+    '''
+    clock that can be stepped forward manually
+    use this to simulate historical data
+    '''
+
+    _virtual_time: pd.Timestamp
+
+    def __init__(self, start: pd.Timestamp) -> None:
+        self._virtual_time = start
+        super().__init__()
+
+    def _time(self) -> pd.Timestamp:
+        return self._virtual_time
+
+    def step(self, delta: pd.Timedelta) -> None:
+        self._virtual_time += delta
+
+
+_CONTEXT_CLOCK: Clock | None = None
+_DEFAULT_CLOCK = RealClock()
+
+
+class TimeDependant(metaclass=ABCMeta):
+    '''
+    objects that exist inside a clock context, do not create outisde a 'with' statment
+    make sure to call super().__init__() in subclasses
+    '''
+
+    _clock: Clock
+
+    def __init__(self) -> None:
+        if _CONTEXT_CLOCK is None:
+            logger.warning(
+                'TimeIdentifiable Object was created outside of a clock context, falling back to default clock'
+            )
+        self._clock = _CONTEXT_CLOCK or _DEFAULT_CLOCK
+
+    @property
+    def clock(self):
         return self._clock
-
-    @clock.setter
-    def clock(self, clock: TClock) -> None:
-        self._clock = clock
