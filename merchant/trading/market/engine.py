@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Collection
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
-from typing import TypeAlias, Collection
+from typing import TypeAlias
 
 import pandas as pd
 from pyarrow import dataset as ds
@@ -16,9 +17,9 @@ from merchant.trading.market.base import BaseMarketData
 from merchant.trading.market.base import Order
 from merchant.trading.market.base import OrderExecution
 from merchant.trading.market.base import Quote
-from merchant.trading.tools.pair import TradingPair
 from merchant.trading.portfolio import Portfolio
 from merchant.trading.tools.asset import Asset
+from merchant.trading.tools.pair import TradingPair
 
 
 SUPPORTED_AGGREGATES = ['1s', '1min', '5min', '15min', '30min', '1h', '1d', '1w', '1m']
