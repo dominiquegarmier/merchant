@@ -1,195 +1,182 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-from collections.abc import Sequence
+import os
+from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import datetime
-from functools import cached_property
 from pathlib import Path
-from typing import Literal
-from typing import TypeAlias
+from typing import cast
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.dataset as ds
-from polygon import RESTClient
-from urllib3 import HTTPResponse
+from alpaca.data import StockHistoricalDataClient
+from alpaca.data.requests import StockTradesRequest
+from selenium import webdriver
 
-from merchant.data.tickers import Ticker
+_DATASET_REGISTRY: dict[str, DatasetMetadata] = {}
 
 
-AggIntervall: TypeAlias = Literal['1s', '1m', '5m', '15m', '1h', '1d']
+OHLCV_SCHEMA = pa.schema(
+    [
+        ('timestamp', pa.timestamp('ns')),  # default timezone is UTC
+        ('ticker', pa.string()),
+        ('open', pa.float64()),
+        ('high', pa.float64()),
+        ('low', pa.float64()),
+        ('close', pa.float64()),
+        ('volume', pa.uint64()),
+        ('trades', pa.uint64()),
+        ('vw_price', pa.float64()),
+    ]
+)
 
-AGG_INTERVAL_MAPPING: dict[str, str] = {
-    's': 'second',
-    'm': 'minute',
-    'h': 'hour',
-    'd': 'day',
+OHLCV_PARTITIONING = ds.partitioning(
+    schema=pa.schema(
+        [
+            ('ticker', pa.string()),
+        ]
+    ),
+)
+
+# TODO
+# 'taker' is dictionary encoded see https://arrow.apache.org/docs/cpp/parquet.html#encodings
+TRADES_SCHEMA = pa.schema(
+    [
+        ('timestamp', pa.timestamp('ns')),  # default timezone is UTC
+        ('ticker', pa.string()),
+        ('exchange', pa.string()),
+        ('taker', pa.string()),
+        ('id', pa.string()),
+        ('price', pa.float64()),
+        ('size', pa.uint64()),
+        ('condition', pa.string()),
+        ('correction', pa.string()),
+    ]
+)
+
+TRADES_PARTITIONING = ds.partitioning(
+    schema=pa.schema(
+        [
+            ('ticker', pa.string()),
+            ('exchange', pa.string()),
+        ]
+    ),
+)
+
+
+# UTP sale conditions
+SALE_CONDITIONS = {
+    '@': 'Regular Trade',
+    'A': 'Acquisition',
+    'B': 'Bunched Trade',
+    'C': 'Cash Sale',
+    'D': 'Distribution',
+    'E': 'Placeholder',
+    'F': 'Intermarket Sweep',
+    'G': 'Bunched Sold Trade',
+    'H': 'Price Variation Trade',
+    'I': 'Odd Lot Trade',
+    'K': 'Rule 155 Trade (AMEX)',
+    'L': 'Sold Last',
+    'M': 'Market Center Official Close',
+    'N': 'Next Day',
+    'O': 'Opening Prints',
+    'P': 'Prior Reference Price',
+    'Q': 'Market Center Official Open',
+    'R': 'Seller',
+    'S': 'Split Trade',
+    'T': 'Form T',
+    'U': 'Extended trading hours (Sold Out of Sequence)',
+    'V': 'Contingent Trade',
+    'W': 'Average Price Trade',
+    'X': 'Cross/Periodic Auction Trade',
+    'Y': 'Yellow Flag Regular Trade',
+    'Z': 'Sold (out of sequence)',
+    '1': 'Stopped Stock (Regular Trade)',
+    '4': 'Derivatively priced',
+    '5': 'Re-Opening Prints',
+    '6': 'Closing Prints',
+    '7': 'Qualified Contingent Trade (“QCT”)',
+    '8': 'Placeholder For 611 Exempt',
+    '9': 'Corrected Consolidated Close (per listing market)',
+}
+
+# Correction satus https://alpaca.markets/docs/api-references/market-data-api/stock-pricing-data/historical/#trade
+CORRECTION_STATUS = {
+    'normal': 'normal trade',
+    'corrected': 'trade was corrected',
+    'cancelled': 'trade was cancelled',
+    'incorrect': 'trade was incorrectly reported',
 }
 
 
-def set_data_path(path: Path | str) -> None:
-    DatasetMetaData.data_path = Path(path)
-
-
 @dataclass
-class APISettings:
-    api_key: str
-    api_cooldown: int
+class DatasetMetadata:
+    path: Path | str | bytes | os.PathLike
+    schema: pa.Schema
+    partitioning: ds.Partitioning
 
 
-def _interval_to_tuple(interval: AggIntervall) -> tuple[int, str]:
-    return int(interval[:-1]), AGG_INTERVAL_MAPPING[interval[-1]]
-
-
-def _get_agg_interval(
-    settings: APISettings, ticker: Ticker, interval: AggIntervall
-) -> pd.DataFrame:
-    client = RESTClient(settings.api_key)
-
-    multiplier, timespan = _interval_to_tuple(interval=interval)
-
-    resp = client.get_aggs(
-        ticker=ticker.ticker,
-        multiplier=multiplier,
-        timespan=timespan,
-        from_=datetime(2022, 1, 1),
-        to=datetime(2022, 2, 1),
-        limit=50000,
-        sort='asc',
-        adjusted=True,
-    )
-
-    if isinstance(resp, HTTPResponse):
-        raise RuntimeError(f'HTTP Error: {resp.status}')
-
-    ret = pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
-    for agg in resp:
-        ret.loc[agg.timestamp * 1_000_000] = [
-            agg.open,
-            agg.high,
-            agg.low,
-            agg.close,
-            agg.volume,
-        ]  # convert ms timestamp to ns
-    raise NotImplementedError
-
-
-def _normalize_data(data: pd.DataFrame) -> pa.Table:
-    raise NotImplementedError
-
-
-def drop_duplicates() -> None:
-    '''drop duplicate timestamp / ticker combinations'''
-    raise NotImplementedError
-
-
-def download_dataset(
-    settings: APISettings, tickers: Sequence[Ticker], interval: AggIntervall
-) -> Dataset:
-    data = pd.DataFrame()
-    for ticker in tickers:
-        df = _get_agg_interval(settings=settings, ticker=ticker, interval=interval)
-        df.columns = pd.MultiIndex.from_product(
-            [[f'{ticker.exchange}:{ticker.ticker}'], df.columns]
-        )
-        data = pd.concat([data, df], axis=1)
-
-    normalized = _normalize_data(data=data)
-
-    ds.write_dataset(
-        data=normalized,
-        base_dir=DatasetMetaData.data_path,
-        partitioning=DatasetMetaData.partitioning,
-    )
-
-    raise NotImplementedError
-
-
-class DatasetMetaData:
-    data_path: Path = Path(__file__).parent.parent.parent / 'data'
-    schema: pa.Schema = pa.schema(
-        [
-            ('timestamp', pa.uint64()),
-            ('exchange:ticker', pa.string()),
-            ('open', pa.float64()),
-            ('high', pa.float64()),
-            ('low', pa.float64()),
-            ('close', pa.float64()),
-            ('volume', pa.float64()),
-        ]
-    )
-    partitioning: ds.Paritioning = ds.partitioning(
-        schema=pa.schema([('ticker', pa.string())]),
-        flavor='hive',
-    )
+def register_dataset(name: str, metadata: DatasetMetadata) -> None:
+    if name in _DATASET_REGISTRY:
+        raise ValueError(f'Dataset {name} already registered')
+    _DATASET_REGISTRY[name] = metadata
 
 
 class Dataset:
+    _pyarrow_dataset: ds.Dataset
+    _filter: pa.Expression | None = None
 
-    _tickers: list[Ticker]
-    _dataset: ds.Dataset
-    _dataset_path: Path
-    _intervall: AggIntervall
-
-    def __init__(
-        self,
-        tickers: Sequence[Ticker],
-        intervall: AggIntervall = '1s',
-    ) -> None:
-        self._tickers = list(tickers)
-        self._dataset_path = DatasetMetaData.data_path / intervall.upper()
-
-        self._dataset = ds.dataset(
-            self._dataset_path,
-            schema=DatasetMetaData.schema,
-            partitioning=DatasetMetaData.partitioning,
+    def __init__(self, metadata: DatasetMetadata) -> None:
+        self._pyarrow_dataset = ds.dataset(
+            metadata.path,
+            schema=metadata.schema,
             format='parquet',
+            partitioning=metadata.partitioning,
         )
 
-    @property
-    def intervall(self) -> AggIntervall:
-        return self._intervall
+    def set_filter(
+        self, include=Collection[str] | None, exclude=Collection[str] | None
+    ) -> None:
+        if (include is None) == (exclude is None):
+            raise ValueError('either include or exclude must be specified')
+        if include is not None:
+            self._filter = pc.field('ticker').isin(include)
+        else:
+            self._filter = ~pc.field('ticker').isin(exclude)
 
-    @property
-    def tickers(self) -> list[Ticker]:
-        return self._tickers
+    def _get_table_slice(self, s: slice) -> pa.Table:
+        start, stop = s.start, s.stop
+        if s.step is not None:
+            raise KeyError('step is not supported')
+        if start is None or stop is None:
+            raise KeyError('start and stop must be specified')
 
-    @cached_property
-    def _exchange_ticker_pairs(self) -> list[str]:
-        return [f'{ticker.exchange}:{ticker.ticker}' for ticker in self.tickers]
+        expr = pc.field('timestamp') >= pa.scalar(start, type=pa.timestamp('ns'))
+        expr &= pc.field('timestamp') <= pa.scalar(stop, type=pa.timestamp('ns'))
 
-    def __contains__(self, ticker: Ticker) -> bool:
-        return ticker in self._tickers
+        if self._filter is not None:
+            expr &= self._filter
 
-    def __len__(self) -> int:
-        return len(self.tickers)
-
-    def __iter__(self) -> Iterator[Ticker]:
-        return self.tickers.__iter__()
+        return self._pyarrow_dataset.to_table(filter=expr)
 
     def __getitem__(self, s: slice) -> pd.DataFrame:
-        ts_from, ts_to = pd.Timestamp(s.start).value, pd.Timestamp(s.stop).value
+        return cast(pd.DataFrame, self._get_table_slice(s).to_pandas())
 
-        if ts_from is None:
-            ts_from = pd.Timestamp.min.value
-        if ts_to is None:
-            ts_to = pd.Timestamp.max.value
 
-        if s.step is not None:
-            raise ValueError('step not supported')
+def registerd_datasets() -> list[str]:
+    return list(_DATASET_REGISTRY.keys())
 
-        table = self._dataset.to_table(
-            filter=(
-                (ds.field('exchange_ticker').isin(self._exchange_ticker_pairs))
-                & (ds.field('timestamp') >= ts_from)
-                & (ds.field('timestamp') <= ts_to)
-            ),
-        )
-        raise NotImplementedError
-        return (
-            table.to_pandas()
-            .pivot(index='timestamp', columns='exchange:ticker')
-            .swaplevel(axis=1)
-            .sort_index(axis=1)
-        )
+
+def load_dataset(name: str) -> Dataset:
+    if name not in _DATASET_REGISTRY:
+        raise ValueError(f'Dataset {name} not registered')
+    return Dataset(metadata=_DATASET_REGISTRY[name])
+
+
+__all__ = [
+    'Dataset',
+    'DatasetMetadata',
+    'load_dataset',
+]

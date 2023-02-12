@@ -11,7 +11,6 @@ import pandas as pd
 
 from merchant.core.clock import TimeDependant
 from merchant.core.numeric import NormedDecimal
-from merchant.core.utils import AggType
 from merchant.trading.portfolio import Portfolio
 from merchant.trading.tools.pair import TradingPair
 
