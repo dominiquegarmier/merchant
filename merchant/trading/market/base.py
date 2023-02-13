@@ -9,7 +9,7 @@ from enum import Enum
 
 import pandas as pd
 
-from merchant.core.clock import TimeDependant
+from merchant.core.abstract import TimeDependant
 from merchant.core.numeric import NormedDecimal
 from merchant.trading.portfolio import Portfolio
 from merchant.trading.tools.pair import TradingPair

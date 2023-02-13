@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from merchant.core.base import Identifiable
+from merchant.core.abstract import Identifiable
 from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.asset import Valuation
 from merchant.trading.tools.pair import TradingPair

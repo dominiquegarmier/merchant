@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 
 import httpx
@@ -99,3 +100,13 @@ def download_tickers(etfs: bool = True) -> pd.DataFrame:
         pbar.update(1)
 
     return pd.DataFrame({'ticker': tickers, 'name': names})
+
+
+TICKER_CACHE_PATH = Path(__file__).parent.parent.parent / 'data/tickers/US_EQUITIES.csv'
+
+
+def get_tickers(cached: bool = True) -> pd.DataFrame:
+    if not cached or not TICKER_CACHE_PATH.exists():
+        tickers = download_tickers()
+        tickers.to_csv(TICKER_CACHE_PATH, index=False)
+    return pd.read_csv(TICKER_CACHE_PATH)

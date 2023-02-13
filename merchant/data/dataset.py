@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Collection
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -10,56 +11,51 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.dataset as ds
-from alpaca.data import StockHistoricalDataClient
-from alpaca.data.requests import StockTradesRequest
-from selenium import webdriver
 
-_DATASET_REGISTRY: dict[str, DatasetMetadata] = {}
+_DATASET_REGISTRY: dict[str, DatasetSpec] = {}
 
 
 OHLCV_SCHEMA = pa.schema(
     [
-        ('timestamp', pa.timestamp('ns')),  # default timezone is UTC
-        ('ticker', pa.string()),
-        ('open', pa.float64()),
-        ('high', pa.float64()),
-        ('low', pa.float64()),
-        ('close', pa.float64()),
-        ('volume', pa.uint64()),
-        ('trades', pa.uint64()),
-        ('vw_price', pa.float64()),
+        ('TIMESTAMP', pa.timestamp('ns')),  # default timezone is UTC
+        ('TICKER', pa.string()),
+        ('OPEN', pa.float64()),
+        ('HIGH', pa.float64()),
+        ('LOW', pa.float64()),
+        ('CLOSE', pa.float64()),
+        ('VOLUME', pa.uint64()),
+        ('TRADES', pa.uint64()),
+        ('VW_PRICE', pa.float64()),
     ]
 )
 
 OHLCV_PARTITIONING = ds.partitioning(
     schema=pa.schema(
         [
-            ('ticker', pa.string()),
+            ('TICKER', pa.string()),
         ]
     ),
 )
-
 # TODO
-# 'taker' is dictionary encoded see https://arrow.apache.org/docs/cpp/parquet.html#encodings
 TRADES_SCHEMA = pa.schema(
     [
-        ('timestamp', pa.timestamp('ns')),  # default timezone is UTC
-        ('ticker', pa.string()),
-        ('exchange', pa.string()),
-        ('taker', pa.string()),
-        ('id', pa.string()),
-        ('price', pa.float64()),
-        ('size', pa.uint64()),
-        ('condition', pa.string()),
-        ('correction', pa.string()),
+        ('TIMESTAMP', pa.timestamp('ns')),  # default timezone is UTC
+        ('TICKER', pa.string()),
+        ('EXCHANGE', pa.string()),
+        ('TAKER', pa.string()),
+        ('ID', pa.string()),
+        ('PRICE', pa.float64()),
+        ('SIZE', pa.uint64()),
+        ('CONDITION', pa.string()),
+        ('CORRECTION', pa.string()),
     ]
 )
 
 TRADES_PARTITIONING = ds.partitioning(
     schema=pa.schema(
         [
-            ('ticker', pa.string()),
-            ('exchange', pa.string()),
+            ('TICKER', pa.string()),
+            ('EXCHANGE', pa.string()),
         ]
     ),
 )
@@ -111,14 +107,14 @@ CORRECTION_STATUS = {
 }
 
 
-@dataclass
-class DatasetMetadata:
+@dataclass(frozen=True)
+class DatasetSpec:
     path: Path | str | bytes | os.PathLike
     schema: pa.Schema
     partitioning: ds.Partitioning
 
 
-def register_dataset(name: str, metadata: DatasetMetadata) -> None:
+def register_dataset(name: str, metadata: DatasetSpec) -> None:
     if name in _DATASET_REGISTRY:
         raise ValueError(f'Dataset {name} already registered')
     _DATASET_REGISTRY[name] = metadata
@@ -127,14 +123,32 @@ def register_dataset(name: str, metadata: DatasetMetadata) -> None:
 class Dataset:
     _pyarrow_dataset: ds.Dataset
     _filter: pa.Expression | None = None
+    _dataset_spec: DatasetSpec
 
-    def __init__(self, metadata: DatasetMetadata) -> None:
+    def __init__(self, metadata: DatasetSpec) -> None:
+        # infer the schema to preserve schema.metadata
         self._pyarrow_dataset = ds.dataset(
             metadata.path,
-            schema=metadata.schema,
             format='parquet',
             partitioning=metadata.partitioning,
         )
+
+        if not self.schema.equals(metadata.schema, check_metadata=False):
+            raise ValueError(
+                f'schema mismatch: {self.schema.metadata} != {metadata.schema.metadata} (metadata is ignored)'
+            )
+
+        # TODO what about non ticker datasets?
+        if not all(name in self.schema.names for name in ('TICKER', 'TIMESTAMP')):
+            raise ValueError('schema must contain `TICKER` and `TIMESTAMP` fields')
+
+    @property
+    def schema(self) -> pa.Schema:
+        return self._pyarrow_dataset.schema
+
+    @property
+    def metadata(self) -> dict[bytes, bytes]:
+        return cast(dict[bytes, bytes], self.schema.metadata)
 
     def set_filter(
         self, include=Collection[str] | None, exclude=Collection[str] | None
@@ -142,9 +156,9 @@ class Dataset:
         if (include is None) == (exclude is None):
             raise ValueError('either include or exclude must be specified')
         if include is not None:
-            self._filter = pc.field('ticker').isin(include)
+            self._filter = pc.field('TICKER').isin(include)
         else:
-            self._filter = ~pc.field('ticker').isin(exclude)
+            self._filter = ~pc.field('TICKER').isin(exclude)
 
     def _get_table_slice(self, s: slice) -> pa.Table:
         start, stop = s.start, s.stop
@@ -153,8 +167,8 @@ class Dataset:
         if start is None or stop is None:
             raise KeyError('start and stop must be specified')
 
-        expr = pc.field('timestamp') >= pa.scalar(start, type=pa.timestamp('ns'))
-        expr &= pc.field('timestamp') <= pa.scalar(stop, type=pa.timestamp('ns'))
+        expr = pc.field('TIMESTAMP') >= pa.scalar(start, type=pa.timestamp('ns'))
+        expr &= pc.field('TIMESTAMP') <= pa.scalar(stop, type=pa.timestamp('ns'))
 
         if self._filter is not None:
             expr &= self._filter
@@ -171,12 +185,12 @@ def registerd_datasets() -> list[str]:
 
 def load_dataset(name: str) -> Dataset:
     if name not in _DATASET_REGISTRY:
-        raise ValueError(f'Dataset {name} not registered')
+        raise ValueError(f'dataset {name} not registered')
     return Dataset(metadata=_DATASET_REGISTRY[name])
 
 
 __all__ = [
     'Dataset',
-    'DatasetMetadata',
+    'DatasetSpec',
     'load_dataset',
 ]

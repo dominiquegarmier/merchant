@@ -69,9 +69,13 @@ def run_hooks(
     func: Callable[Concatenate[TObservable, P], R] | None = None,
     *,
     signal: str | tuple[str] | None = None,
-) -> Callable[Concatenate[TObservable, P], R] | Callable[
-    [Callable[Concatenate[TObservable, P], R]], Callable[Concatenate[TObservable, P], R]
-]:
+) -> (
+    Callable[Concatenate[TObservable, P], R]
+    | Callable[
+        [Callable[Concatenate[TObservable, P], R]],
+        Callable[Concatenate[TObservable, P], R],
+    ]
+):
     def decorator(_func: Callable[Concatenate[TObservable, P], R]):
         @functools.wraps(_func)
         def wrapper(self: TObservable, *args: P.args, **kwargs: P.kwargs) -> R:
@@ -106,9 +110,13 @@ def reset_hooks(
     func: Callable[Concatenate[TObservable, P], R] | None = None,
     *,
     signal: str | tuple[str] | None = None,
-) -> Callable[Concatenate[TObservable, P], R] | Callable[
-    [Callable[Concatenate[TObservable, P], R]], Callable[Concatenate[TObservable, P], R]
-]:
+) -> (
+    Callable[Concatenate[TObservable, P], R]
+    | Callable[
+        [Callable[Concatenate[TObservable, P], R]],
+        Callable[Concatenate[TObservable, P], R],
+    ]
+):
     def decorator(_func: Callable[Concatenate[TObservable, P], R]):
         @functools.wraps(_func)
         def wrapper(self: TObservable, *args: P.args, **kwargs: P.kwargs) -> R:
