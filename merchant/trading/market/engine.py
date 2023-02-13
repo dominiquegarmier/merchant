@@ -12,8 +12,10 @@ import pandas as pd
 from pyarrow import dataset as ds
 
 from merchant.core.numeric import NormedDecimal
+from merchant.data.dataset import Dataset
 from merchant.trading.market.base import BaseBroker
 from merchant.trading.market.base import BaseMarketData
+from merchant.trading.market.base import InsufficientAssets
 from merchant.trading.market.base import Order
 from merchant.trading.market.base import OrderExecution
 from merchant.trading.market.base import Quote
@@ -21,35 +23,52 @@ from merchant.trading.portfolio import Portfolio
 from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.pair import TradingPair
 
-
 SUPPORTED_AGGREGATES = ['1s', '1min', '5min', '15min', '30min', '1h', '1d', '1w', '1m']
 AggregateType = Literal['1s', '1min', '5min', '15min', '30min', '1h', '1d', '1w', '1m']
 
+SLIPPAGE_RATIO = 0.0001
 
-class Dataset:
+
+# TODO: improve this
+def _slippage_model(price: float) -> float:
+    return price * (1 + random.uniform(-SLIPPAGE_RATIO, SLIPPAGE_RATIO))
+
+
+class MarketEngine(BaseBroker):
+    _dataset: Dataset
+    _portfolio: Portfolio
     _pairs: set[TradingPair]
-    _aggregates: dict[TradingPair, set[AggregateType]]
-    _dataset: ds.Dataset
 
-    def __init__(self, path_to_dataset: str | Path) -> None:
-        raise NotImplementedError
-
-    def __getitem__(self, s: slice) -> pd.DataFrame:
-        raise NotImplementedError
-
-
-class HistoricalBroker(BaseBroker):
     def __init__(self, dataset: Dataset, assets: Collection[Asset]) -> None:
         super().__init__()
         self._dataset = dataset
         self._portfolio = Portfolio(assets=assets)
 
+    def execute_order(self, order: Order) -> OrderExecution:
+        quote = _get_context_consistent_quote(
+            self._dataset, timestamp=self.clock.time, pair=order.pair
+        )
+
+        execution_rate = NormedDecimal(_slippage_model(quote))
+
+        if (
+            self._portfolio.assets[order.pair.sell]
+            < NormedDecimal(execution_rate) * order.quantity * order.pair.sell
+        ):
+            raise InsufficientAssets(order=order)
+
+        return OrderExecution(
+            order=order,
+            timestamp=self.clock.time,
+            rate=execution_rate,
+        )
+
     def update_portfolio(self) -> Portfolio:
         '''update value of portfolio and record history'''
         raise NotImplementedError
-        return self._portfolio
 
 
+# TODO
 class HistoricalMarketData(BaseMarketData):
     _dataset: Dataset
     _portfolio: Portfolio
@@ -57,12 +76,6 @@ class HistoricalMarketData(BaseMarketData):
     def __init__(self, dataset: Dataset) -> None:
         super().__init__()
         self._dataset = dataset
-
-    def get_quote(self, pair: TradingPair) -> Quote:
-        quote = _get_context_consistent_quote(
-            self._dataset, timestamp=self.clock.time, pair=pair
-        )
-        return Quote(pair=pair, rate=quote, time=self.clock.time)
 
 
 _TCandle: TypeAlias = tuple[int, int, float, float, float, float, float]
@@ -81,8 +94,9 @@ def _unpack_ohlcv(df: pd.DataFrame) -> _TCandle:
 
 
 _CACHED_TIMESTAMP = None
-_QUOTE_CACHE: dict[TradingPair, NormedDecimal] = {}
+_QUOTE_CACHE: dict[TradingPair, float] = {}
 
+_AGG_SIZE = 60
 _WINDOW_SIZE = 100
 _CACHED_WINDOW_SLICE: pd.DataFrame | None = None
 _CACHED_WINDOW: tuple[pd.Timestamp, pd.Timestamp] | None = None
@@ -90,7 +104,7 @@ _CACHED_WINDOW: tuple[pd.Timestamp, pd.Timestamp] | None = None
 
 def _get_window_slice(timestamp: pd.Timestamp) -> tuple[pd.Timestamp, pd.Timestamp]:
     # multiply by aggregate size
-    window = _WINDOW_SIZE * 60 * 1000_000_000
+    window = _WINDOW_SIZE * _AGG_SIZE * 1_000_000_000
     start = timestamp.value // window * window
     end = start + window
 
@@ -119,14 +133,13 @@ def _get_containing_candle(
     dataset: Dataset, timestamp: pd.Timestamp, pair: TradingPair
 ) -> _TCandle:
     window = _get_rolling_window_cached(dataset=dataset, timestamp=timestamp)
-    # TODO: fix this once final dataframe format is decided
-    pair_df = window[str(pair)]
-    return _unpack_ohlcv(pair_df.iloc[pair_df.index.get_loc(timestamp, method='nearest')])  # type: ignore
+    pair_df = window[str(pair)]  # TODO: cast to propper ticker
+    index = pair_df.index.searchsorted(timestamp, side='left')
+
+    return _unpack_ohlcv(pair_df.iloc[index])  # type: ignore
 
 
-def _randomized_interpolated_quote(
-    candle: _TCandle, timestamp: pd.Timestamp
-) -> NormedDecimal:
+def _randomized_interpolated_quote(candle: _TCandle, timestamp: pd.Timestamp) -> float:
     '''
     get a random value of a realistic quote, based on a candle and the relative time rel_time in [0, 1]
     '''
@@ -138,16 +151,14 @@ def _randomized_interpolated_quote(
     h_close = max(0, WINDOW_RATIO * rel_time - 1)
     h_mid = max(0, min(1, (1 - abs(rel_time - 0.5) * 2) * WINDOW_RATIO))
 
-    return NormedDecimal(
-        h_open * open + h_close * close + h_mid * random.uniform(low, high)
-    )
+    return h_open * open + h_close * close + h_mid * random.uniform(low, high)
 
 
 def _get_context_consistent_quote(
     dataset: Dataset,
     timestamp: pd.Timestamp,
     pair: TradingPair,
-) -> NormedDecimal:
+) -> float:
     global _QUOTE_CACHE
     global _CACHED_TIMESTAMP
 

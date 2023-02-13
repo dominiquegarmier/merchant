@@ -176,7 +176,24 @@ class Dataset:
         return self._pyarrow_dataset.to_table(filter=expr)
 
     def __getitem__(self, s: slice) -> pd.DataFrame:
-        return cast(pd.DataFrame, self._get_table_slice(s).to_pandas())
+        '''
+        return a DataFrame with multiindex columns and timestamp as rows index
+        the outer column level is for the ticker
+
+        if you want the ohlcv for a specific ticker and time do:
+
+        >>> df['AAPL'].loc[timestamp]
+
+        or to find nearest timestamp:
+        >>> idx = df['AAPL'].index.searchsorted(timestamp, side='left')]
+        >>> df['AAPL'].iloc[idx]
+        '''
+        dataframe = cast(pd.DataFrame, self._get_table_slice(s).to_pandas())
+        dataframe.pivot(index='TIMESTAMP', columns='TICKER').swaplevel(
+            axis=1
+        ).sort_index(axis=1)
+
+        return dataframe
 
 
 def registerd_datasets() -> list[str]:

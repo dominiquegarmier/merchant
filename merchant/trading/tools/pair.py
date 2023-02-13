@@ -60,11 +60,19 @@ class _TradingPair(metaclass=ABCMeta):
 
 
 class TradingPair(_TradingPair):
-    _buy: Instrument
-    _sell: Instrument
+    _buy: Instrument  # what you get
+    _sell: Instrument  # what you lose
 
     def __init__(self, buy: Instrument, sell: Instrument) -> None:
         super().__init__(buy, sell)
+
+    @property
+    def buy(self) -> Instrument:
+        return self._buy
+
+    @property
+    def sell(self) -> Instrument:
+        return self._sell
 
 
 class VirtualTradingPair(_TradingPair):

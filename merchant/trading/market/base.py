@@ -15,27 +15,37 @@ from merchant.trading.portfolio import Portfolio
 from merchant.trading.tools.pair import TradingPair
 
 
-@dataclass
+@dataclass(frozen=True)
 class Order:
-    '''only supports market orders for now'''
-
     pair: TradingPair
     quantity: NormedDecimal
     timestamp: pd.Timestamp
 
 
-@dataclass
+@dataclass(frozen=True)
 class OrderExecution:
     order: Order
     timestamp: pd.Timestamp
     rate: NormedDecimal
 
 
-@dataclass
+@dataclass(frozen=True)
 class Quote:
     pair: TradingPair
     rate: NormedDecimal
     time: pd.Timestamp
+
+
+class BrokerExceptions(Exception):
+    ...
+
+
+class InsufficientAssets(BrokerExceptions):
+    _order: Order
+
+    def __init__(self, order: Order) -> None:
+        super().__init__(f'Insufficient balance to execute order: {order}')
+        self._order = order
 
 
 class BaseMarketData(TimeDependant, metaclass=ABCMeta):
