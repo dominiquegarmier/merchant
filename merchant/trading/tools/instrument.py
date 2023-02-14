@@ -84,12 +84,16 @@ class Instrument:
             return VirtualTradingPair(__o, self)
         return TradingPair(__o, self)
 
-    def __mul__(self, __o: Decimal) -> Asset:
+    def __mul__(self, __o: Decimal | int) -> Asset:
         '''allows you to create an 'Asset' with A * n'''
+        if isinstance(__o, int):
+            __o = Decimal(__o)
         return Asset(self, quantity=__o)
 
-    def __rmul__(self, __o: Decimal) -> Asset:
+    def __rmul__(self, __o: Decimal | int) -> Asset:
         '''allows you to create an 'Asset' with n * A'''
+        if isinstance(__o, int):
+            __o = Decimal(__o)
         return self.__mul__(__o)
 
     def __hash__(self) -> int:

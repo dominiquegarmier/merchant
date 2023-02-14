@@ -12,6 +12,7 @@ import pandas as pd
 from merchant.core.abstract import TimeDependant
 from merchant.core.numeric import NormedDecimal
 from merchant.trading.portfolio import Portfolio
+from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.pair import TradingPair
 
 
@@ -27,6 +28,7 @@ class OrderExecution:
     order: Order
     timestamp: pd.Timestamp
     rate: NormedDecimal
+    fees: Asset
 
 
 @dataclass(frozen=True)

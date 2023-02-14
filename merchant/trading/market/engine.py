@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import random
+from abc import ABCMeta
+from abc import abstractmethod
 from collections.abc import Collection
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from typing import Protocol
 from typing import TypeAlias
 
 import pandas as pd
@@ -19,7 +22,7 @@ from merchant.trading.market.base import InsufficientAssets
 from merchant.trading.market.base import Order
 from merchant.trading.market.base import OrderExecution
 from merchant.trading.market.base import Quote
-from merchant.trading.portfolio import Portfolio
+from merchant.trading.market.portfolio import Portfolio
 from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.pair import TradingPair
 
@@ -29,9 +32,26 @@ AggregateType = Literal['1s', '1min', '5min', '15min', '30min', '1h', '1d', '1w'
 SLIPPAGE_RATIO = 0.0001
 
 
+_TCandle: TypeAlias = tuple[float, float, float, float, int, int, float]
+
+
 # TODO: improve this
 def _slippage_model(price: float) -> float:
     return price * (1 + random.uniform(-SLIPPAGE_RATIO, SLIPPAGE_RATIO))
+
+
+class SlippageModel(Protocol):
+    def __call__(
+        self, order: Order, quote: NormedDecimal, candle: _TCandle
+    ) -> NormedDecimal:
+        # retuns adjusted (virtual) quote after slippage
+        ...
+
+
+class FeeModel(Protocol):
+    def __call__(self, order: Order, quote: NormedDecimal) -> Asset:
+        # returns the base asset costs due to fees
+        ...
 
 
 class MarketEngine(BaseBroker):
@@ -39,28 +59,49 @@ class MarketEngine(BaseBroker):
     _portfolio: Portfolio
     _pairs: set[TradingPair]
 
-    def __init__(self, dataset: Dataset, assets: Collection[Asset]) -> None:
+    _slippage: SlippageModel
+    _fees: FeeModel
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        assets: Collection[Asset],
+        slippage: SlippageModel,
+        fees: FeeModel,
+    ) -> None:
         super().__init__()
         self._dataset = dataset
         self._portfolio = Portfolio(assets=assets)
 
+        self._fees = fees
+        self._slippage = slippage
+
     def execute_order(self, order: Order) -> OrderExecution:
+        timestamp = self.clock.time
         quote = _get_context_consistent_quote(
-            self._dataset, timestamp=self.clock.time, pair=order.pair
+            self._dataset, timestamp=timestamp, pair=order.pair
+        )
+        candle = _get_containing_candle(
+            self._dataset, timestamp=timestamp, pair=order.pair
         )
 
-        execution_rate = NormedDecimal(_slippage_model(quote))
+        # calculate finaly execution price after slippage and fees
+        slippage_adj_quote = self._slippage(order=order, quote=quote, candle=candle)
+        fees = self._fees(order=order, quote=slippage_adj_quote)
+        price_after_fees = order.pair.sell * slippage_adj_quote * order.quantity + fees
 
-        if (
-            self._portfolio.assets[order.pair.sell]
-            < NormedDecimal(execution_rate) * order.quantity * order.pair.sell
-        ):
+        if self._portfolio.assets[order.pair.sell] < price_after_fees:
             raise InsufficientAssets(order=order)
+
+        # keep track of transaction in portfolio
+        self._portfolio._increase_holdings(asset=order.pair.buy * order.quantity)
+        self._portfolio._decrease_holdings(asset=price_after_fees)
 
         return OrderExecution(
             order=order,
             timestamp=self.clock.time,
-            rate=execution_rate,
+            rate=slippage_adj_quote,
+            fees=fees,
         )
 
     def update_portfolio(self) -> Portfolio:
@@ -78,18 +119,15 @@ class HistoricalMarketData(BaseMarketData):
         self._dataset = dataset
 
 
-_TCandle: TypeAlias = tuple[int, int, float, float, float, float, float]
-
-
 def _unpack_ohlcv(df: pd.DataFrame) -> _TCandle:
     return (  # type: ignore
-        df['timestamp_start'].astype(int),
-        df['timestamp_end'].astype(int),
-        df['open'],
-        df['high'],
-        df['low'],
-        df['close'],
-        df['volume'],
+        df['OPEN'],
+        df['HIGH'],
+        df['LOW'],
+        df['CLOSE'],
+        df['VOLUME'],
+        df['TRADES'],
+        df['VW_PRICE'],
     )
 
 
@@ -158,7 +196,7 @@ def _get_context_consistent_quote(
     dataset: Dataset,
     timestamp: pd.Timestamp,
     pair: TradingPair,
-) -> float:
+) -> NormedDecimal:
     global _QUOTE_CACHE
     global _CACHED_TIMESTAMP
 
@@ -170,4 +208,4 @@ def _get_context_consistent_quote(
         _QUOTE_CACHE[pair] = _randomized_interpolated_quote(
             _get_containing_candle(dataset, timestamp, pair), timestamp
         )
-    return _QUOTE_CACHE[pair]
+    return NormedDecimal(_QUOTE_CACHE[pair])
