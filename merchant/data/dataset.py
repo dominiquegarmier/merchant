@@ -4,6 +4,7 @@ import os
 from collections.abc import Collection
 from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import cast
 
@@ -105,6 +106,13 @@ CORRECTION_STATUS = {
     'cancelled': 'trade was cancelled',
     'incorrect': 'trade was incorrectly reported',
 }
+
+
+class Aggregates(Enum):
+    SEC = 1
+    MIN = 60
+    HOUR = 60 * 60
+    DAY = 60 * 60 * 24
 
 
 @dataclass(frozen=True)
