@@ -59,6 +59,16 @@ class InsufficientAssets(BrokerExceptions):
         self._order = order
 
 
+class OrderAfterValuation(BrokerExceptions):
+    _valuation: pd.Timestamp
+    _order: Order
+
+    def __init__(self, order: Order, valuation: pd.Timestamp) -> None:
+        super().__init__(f'Order {order} placed after valuation at {valuation}')
+        self._valuation = valuation
+        self._order = order
+
+
 class BaseMarketData(TimeDependant, metaclass=ABCMeta):
     def __init__(self) -> None:
         super().__init__()
@@ -90,4 +100,17 @@ class BaseBroker(TimeDependant, metaclass=ABCMeta):
 
     @abstractmethod
     def update_portfolio(self) -> Portfolio:
+        ...
+
+    @abstractproperty
+    def minimum_timestep(self) -> pd.Timedelta:
+        '''
+        this timestep must ensure that the broker can execute orders again after a valuation
+        it also makes sure that execution prices are consistent between two steps (i.e when
+        using historical data this must be greater than the aggregates durations)
+
+        example:
+        - a realtime broker might have a minimum timestep of 0 seconds
+        - a (historical data) broker using 1 minute candles must have a minimum timestep of 1 minute or greater
+        '''
         ...

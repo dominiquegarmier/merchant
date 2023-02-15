@@ -29,7 +29,7 @@ class Portfolio(TimeDependant):
         # data that gets set by the market engine
         self._value = None
         self._value_history = pd.DataFrame(
-            index=pd.DatetimeIndex([]), columns=['OPEN', 'HIGH', 'LOW', 'CLOSE']
+            index=pd.DatetimeIndex([]), columns=['VALUE']
         )
         self._trade_histroy = []
 

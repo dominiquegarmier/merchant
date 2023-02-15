@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 from collections import defaultdict
 from collections.abc import Collection
+from decimal import Decimal
 from typing import cast
 from typing import NamedTuple
 from typing import Protocol
@@ -17,16 +18,26 @@ from merchant.trading.market.base import BaseBroker
 from merchant.trading.market.base import BaseMarketData
 from merchant.trading.market.base import InsufficientAssets
 from merchant.trading.market.base import Order
+from merchant.trading.market.base import OrderAfterValuation
 from merchant.trading.market.base import OrderExecution
 from merchant.trading.market.base import Trade
 from merchant.trading.market.portfolio import Portfolio
 from merchant.trading.tools.asset import Asset
+from merchant.trading.tools.asset import Valuation
 from merchant.trading.tools.instrument import Instrument
 from merchant.trading.tools.instrument import USD
 from merchant.trading.tools.pair import TradingPair
 
 
-SLIPPAGE_RATIO = 0.0001
+class Candle(NamedTuple):
+    TIMESTAMP: pd.Timestamp
+    OPEN: float
+    HIGH: float
+    LOW: float
+    CLOSE: float
+    VOLUME: float
+    TRADES: int
+    VW_PRICE: float
 
 
 # methods to edit portfolio
@@ -77,17 +88,6 @@ def _raise_if_insufficient_assets(
             raise InsufficientAssets(order=order)
 
 
-class Candle(NamedTuple):
-    TIMESTAMP: pd.Timestamp
-    OPEN: float
-    HIGH: float
-    LOW: float
-    CLOSE: float
-    VOLUME: float
-    TRADES: int
-    VW_PRICE: float
-
-
 class SlippageModel(Protocol):
     def __call__(
         self, order: Order, quote: NormedDecimal, candle: Candle
@@ -110,6 +110,8 @@ class MarketEngine(BaseBroker):
     _slippage: SlippageModel
     _fees: FeeModel
     _aggregate_type: Aggregates
+
+    _locked: pd.Timestamp | None = None
 
     def __init__(
         self,
@@ -181,9 +183,43 @@ class MarketEngine(BaseBroker):
 
         return order_execution
 
+    def _check_lock_or_raise(self, order: Order) -> None:
+        if self._locked is not None and self._locked > self.clock.time:
+            raise OrderAfterValuation(order=order, valuation=self._locked)
+        self._locked = None
+
+    def _calculate_value(self) -> tuple[Valuation, pd.Timestamp]:
+        value: float = 0.0
+        for instrument, asset in self._portfolio.assets.items():
+            candle = _get_containing_candle(
+                self._dataset, timestamp=self.clock.time, instrument=instrument
+            )
+            value += float(asset.quantity) * candle.CLOSE
+            timestamp = candle.TIMESTAMP
+
+        # timestamp of end of candle
+        timestamp = pd.Timestamp(
+            timestamp.value + self._aggregate_type.value * 1_000_000_000
+        )
+        return Valuation(NormedDecimal(value) * USD), timestamp
+
     def update_portfolio(self) -> Portfolio:
-        '''update value of portfolio and record history'''
-        raise NotImplementedError
+        '''
+        update value of portfolio and record history
+        this locks the portfolio to trading until the next candle
+        '''
+
+        value, timestamp = self._calculate_value()
+        self._locked = timestamp
+
+        self._portfolio._value = value
+        self._portfolio._value_history[timestamp] = float(value)
+
+        return self._portfolio
+
+    @property
+    def minimum_timestep(self) -> pd.Timedelta:
+        return pd.Timedelta(self._aggregate_type.value, unit='s')
 
 
 # TODO remove this
