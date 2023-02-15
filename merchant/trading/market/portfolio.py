@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Collection
-from typing import Any
 
 import pandas as pd
 
 from merchant.core.abstract import TimeDependant
+from merchant.trading.market.base import Trade
 from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.asset import Valuation
 from merchant.trading.tools.instrument import Instrument
@@ -19,13 +18,20 @@ class Portfolio(TimeDependant):
 
     _value: Valuation | None
     _value_history: pd.DataFrame
+    _trade_histroy: list[Trade]
 
     def __init__(
         self, assets: Collection[Asset], primary_instrument: Instrument = USD
     ) -> None:
         self._assets = {asset.instrument: asset for asset in assets}
         self._primary_instrument = primary_instrument
+
+        # data that gets set by the market engine
         self._value = None
+        self._value_history = pd.DataFrame(
+            index=pd.DatetimeIndex([]), columns=['OPEN', 'HIGH', 'LOW', 'CLOSE']
+        )
+        self._trade_histroy = []
 
     @property
     def assets(self) -> dict[Instrument, Asset]:
@@ -42,19 +48,3 @@ class Portfolio(TimeDependant):
     @property
     def balance(self) -> Asset:
         return self._assets[self._primary_instrument]
-
-    def _increase_holdings(self, asset: Asset) -> None:
-        balance = self._get_holding(asset.instrument)
-        self._set_holding(balance + asset)
-
-    def _decrease_holdings(self, asset: Asset) -> None:
-        balance = self._get_holding(asset.instrument)
-        self._set_holding(balance - asset)
-
-    def _get_holding(self, instrument: Instrument) -> Asset:
-        if instrument not in self._assets:
-            return 0 * instrument
-        return self._assets[instrument]
-
-    def _set_holding(self, asset: Asset) -> None:
-        self._assets[asset.instrument] = asset

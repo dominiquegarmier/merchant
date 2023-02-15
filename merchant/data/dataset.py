@@ -1,19 +1,51 @@
 from __future__ import annotations
 
 import os
+import random
+from abc import ABCMeta
+from abc import abstractmethod
+from abc import abstractproperty
 from collections.abc import Collection
-from collections.abc import Iterable
 from dataclasses import dataclass
-from enum import Enum
+from datetime import datetime
+from functools import cached_property
 from pathlib import Path
 from typing import cast
 
+import exchange_calendars as xcals
 import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.dataset as ds
 
+from merchant.data.constants import Aggregates
+from merchant.data.synthetic import synthetic_intraday
+
 _DATASET_REGISTRY: dict[str, DatasetSpec] = {}
+
+
+@dataclass(frozen=True)
+class DatasetSpec:
+    path: Path | str | bytes | os.PathLike
+    schema: pa.Schema
+    partitioning: ds.Partitioning
+
+
+class Dataset(metaclass=ABCMeta):
+    @abstractproperty
+    def tickers(self) -> list[str]:
+        ...
+
+    @abstractmethod
+    def __getitem__(self, s: slice) -> pd.DataFrame:
+        ...
+
+
+# TODO make this a Protocol
+class OHLCVDataset(Dataset, metaclass=ABCMeta):
+    @abstractproperty
+    def aggregate_type(self) -> Aggregates:
+        ...
 
 
 OHLCV_SCHEMA = pa.schema(
@@ -62,73 +94,29 @@ TRADES_PARTITIONING = ds.partitioning(
 )
 
 
-# UTP sale conditions
-SALE_CONDITIONS = {
-    '@': 'Regular Trade',
-    'A': 'Acquisition',
-    'B': 'Bunched Trade',
-    'C': 'Cash Sale',
-    'D': 'Distribution',
-    'E': 'Placeholder',
-    'F': 'Intermarket Sweep',
-    'G': 'Bunched Sold Trade',
-    'H': 'Price Variation Trade',
-    'I': 'Odd Lot Trade',
-    'K': 'Rule 155 Trade (AMEX)',
-    'L': 'Sold Last',
-    'M': 'Market Center Official Close',
-    'N': 'Next Day',
-    'O': 'Opening Prints',
-    'P': 'Prior Reference Price',
-    'Q': 'Market Center Official Open',
-    'R': 'Seller',
-    'S': 'Split Trade',
-    'T': 'Form T',
-    'U': 'Extended trading hours (Sold Out of Sequence)',
-    'V': 'Contingent Trade',
-    'W': 'Average Price Trade',
-    'X': 'Cross/Periodic Auction Trade',
-    'Y': 'Yellow Flag Regular Trade',
-    'Z': 'Sold (out of sequence)',
-    '1': 'Stopped Stock (Regular Trade)',
-    '4': 'Derivatively priced',
-    '5': 'Re-Opening Prints',
-    '6': 'Closing Prints',
-    '7': 'Qualified Contingent Trade (“QCT”)',
-    '8': 'Placeholder For 611 Exempt',
-    '9': 'Corrected Consolidated Close (per listing market)',
-}
-
-# Correction satus https://alpaca.markets/docs/api-references/market-data-api/stock-pricing-data/historical/#trade
-CORRECTION_STATUS = {
-    'normal': 'normal trade',
-    'corrected': 'trade was corrected',
-    'cancelled': 'trade was cancelled',
-    'incorrect': 'trade was incorrectly reported',
-}
-
-
-class Aggregates(Enum):
-    SEC = 1
-    MIN = 60
-    HOUR = 60 * 60
-    DAY = 60 * 60 * 24
-
-
-@dataclass(frozen=True)
-class DatasetSpec:
-    path: Path | str | bytes | os.PathLike
-    schema: pa.Schema
-    partitioning: ds.Partitioning
-
-
 def register_dataset(name: str, metadata: DatasetSpec) -> None:
     if name in _DATASET_REGISTRY:
         raise ValueError(f'Dataset {name} already registered')
     _DATASET_REGISTRY[name] = metadata
 
 
-class Dataset:
+def _validate_datetime_slice(s: slice) -> tuple[datetime, datetime]:
+    start, stop = s.start, s.stop
+    if s.step is not None:
+        raise KeyError('step is not supported')
+    if start is None or stop is None:
+        raise KeyError('start and stop must be specified')
+
+    # supports anything that is accepted by pd.Timestamp
+    if not isinstance(start, datetime):
+        start = pd.Timestamp(start).to_pydatetime()
+    if not isinstance(stop, datetime):
+        stop = pd.Timestamp(stop).to_pydatetime()
+
+    return start, stop
+
+
+class ParquetDataset(Dataset):
     _pyarrow_dataset: ds.Dataset
     _filter: pa.Expression | None = None
     _dataset_spec: DatasetSpec
@@ -158,6 +146,13 @@ class Dataset:
     def metadata(self) -> dict[bytes, bytes]:
         return cast(dict[bytes, bytes], self.schema.metadata)
 
+    @cached_property
+    def tickers(self) -> list[str]:
+        return cast(
+            list[str],
+            pc.unique(self._pyarrow_dataset.scanner(columns=['TICKER'])).to_pylist(),
+        )
+
     def set_filter(
         self, include=Collection[str] | None, exclude=Collection[str] | None
     ) -> None:
@@ -169,12 +164,7 @@ class Dataset:
             self._filter = ~pc.field('TICKER').isin(exclude)
 
     def _get_table_slice(self, s: slice) -> pa.Table:
-        start, stop = s.start, s.stop
-        if s.step is not None:
-            raise KeyError('step is not supported')
-        if start is None or stop is None:
-            raise KeyError('start and stop must be specified')
-
+        start, stop = _validate_datetime_slice(s)
         expr = pc.field('TIMESTAMP') >= pa.scalar(start, type=pa.timestamp('ns'))
         expr &= pc.field('TIMESTAMP') <= pa.scalar(stop, type=pa.timestamp('ns'))
 
@@ -187,14 +177,6 @@ class Dataset:
         '''
         return a DataFrame with multiindex columns and timestamp as rows index
         the outer column level is for the ticker
-
-        if you want the ohlcv for a specific ticker and time do:
-
-        >>> df['AAPL'].loc[timestamp]
-
-        or to find nearest timestamp:
-        >>> idx = df['AAPL'].index.searchsorted(timestamp, side='left')]
-        >>> df['AAPL'].iloc[idx]
         '''
         dataframe = cast(pd.DataFrame, self._get_table_slice(s).to_pandas())
         dataframe.pivot(index='TIMESTAMP', columns='TICKER').swaplevel(
@@ -204,6 +186,94 @@ class Dataset:
         return dataframe
 
 
+# Defaults for synthetic dataset
+_SYNTHETIC_DEFAULT_N_TICKERS = 10
+_SYNTHETIC_DEFAULT_START_PRICE_RANGE = (100, 1000)
+_SYNTHETIC_DEFAULT_DAILY_VOLATILITY = 0.01
+_SYNTHETIC_DEFAULT_DAILY_SHIFT = 0
+_SYNTHETIC_DEFAULT_MEAN_VOLUME = 10_000_000
+_SYNTHETIC_DEFAULT_MEAN_TRADE_SIZE = 10_000
+
+
+class SyntheticDataset(Dataset):
+    _tickers: list[str]
+    _data: pd.DataFrame
+
+    _start: datetime
+    _end: datetime
+    _aggregate: Aggregates
+
+    def __init__(
+        self,
+        start: datetime | str,
+        end: datetime | str,
+        tickers: list[str] | dict[str, float] | None = None,
+        aggregate: Aggregates = Aggregates.MIN,
+    ):
+        if tickers is None:
+            tickers = [
+                f'SYN{chr(i) if i <= ord("Z") else i - ord("Z")}'
+                for i in range(ord('A'), ord('A') + _SYNTHETIC_DEFAULT_N_TICKERS)
+            ]
+        self._tickers = list(tickers)
+        self._aggregate = aggregate
+
+        if isinstance(start, str):
+            start = datetime.strptime(start, '%Y-%m-%d')
+        if isinstance(end, str):
+            end = datetime.strptime(end, '%Y-%m-%d')
+
+        self._start = start
+        self._end = end
+        self._data = self._gen_data(tickers if isinstance(tickers, dict) else None)
+
+    def _gen_data(self, start_prices: dict[str, float] | None = None) -> pd.DataFrame:
+        xnys = xcals.get_calendar('XNYS')  # NYSE
+        trading_days: list[str] = xnys.sessions_in_range(
+            str(self._start.date()), str(self._end.date())
+        ).to_list()
+
+        ticker_data: dict[str, pd.DataFrame] = {}
+        for ticker in self._tickers:
+            if start_prices is None:
+                a, b = _SYNTHETIC_DEFAULT_START_PRICE_RANGE
+                start_price = random.random() * (b - a) + a
+            else:
+                start_price = start_prices[ticker]
+
+            days: list[pd.DataFrame] = []
+            for day in trading_days:
+                sigma = _SYNTHETIC_DEFAULT_DAILY_VOLATILITY
+                mu = _SYNTHETIC_DEFAULT_DAILY_SHIFT
+                data = synthetic_intraday(
+                    start_price,
+                    day,
+                    timeframe=self._aggregate,
+                    mean_volume=_SYNTHETIC_DEFAULT_MEAN_VOLUME,
+                    mean_trade_size=_SYNTHETIC_DEFAULT_MEAN_TRADE_SIZE,
+                    sigma=sigma,
+                    mu=mu,
+                )
+                assert data is not None, 'data is None'
+
+                start_price = data['CLOSE'].iloc[-1]
+                days.append(data)
+
+            ticker_data[ticker] = pd.concat(days)
+        return pd.concat(ticker_data, axis=1)
+
+    def __getitem__(self, s: slice) -> pd.DataFrame:
+        start, stop = _validate_datetime_slice(s)
+        return cast(
+            pd.DataFrame,
+            self._data.loc[(self._data.index <= stop) & (self._data.index >= start)],
+        )
+
+    @property
+    def tickers(self) -> list[str]:
+        return self._tickers
+
+
 def registerd_datasets() -> list[str]:
     return list(_DATASET_REGISTRY.keys())
 
@@ -211,7 +281,7 @@ def registerd_datasets() -> list[str]:
 def load_dataset(name: str) -> Dataset:
     if name not in _DATASET_REGISTRY:
         raise ValueError(f'dataset {name} not registered')
-    return Dataset(metadata=_DATASET_REGISTRY[name])
+    return ParquetDataset(metadata=_DATASET_REGISTRY[name])
 
 
 __all__ = [

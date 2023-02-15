@@ -4,16 +4,17 @@ from abc import ABCMeta
 from abc import abstractmethod
 from abc import abstractproperty
 from dataclasses import dataclass
-from decimal import Decimal
-from enum import Enum
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from merchant.core.abstract import TimeDependant
 from merchant.core.numeric import NormedDecimal
-from merchant.trading.portfolio import Portfolio
 from merchant.trading.tools.asset import Asset
 from merchant.trading.tools.pair import TradingPair
+
+if TYPE_CHECKING:
+    from merchant.trading.market.portfolio import Portfolio
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,14 @@ class OrderExecution:
     timestamp: pd.Timestamp
     rate: NormedDecimal
     fees: Asset
+
+
+@dataclass(frozen=True)
+class Trade:
+    sold: Asset
+    bought: Asset
+    fees: Asset
+    execution: OrderExecution
 
 
 @dataclass(frozen=True)
