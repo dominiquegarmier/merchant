@@ -13,6 +13,10 @@ logger = getLogger(__name__)
 
 
 class Observable(metaclass=ABCMeta):
+    '''
+    an object that can yield an observation
+    '''
+
     @abstractproperty
     def observation_shape(self) -> tuple[int, ...]:
         ...

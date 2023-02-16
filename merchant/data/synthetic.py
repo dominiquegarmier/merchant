@@ -44,7 +44,7 @@ def synthetic_intraday(
     date: datetime | str = datetime(2020, 1, 2),
     timeframe: Aggregates = Aggregates.MIN,
     mean_volume: int = 1_000_000_000,
-    mean_trade_size: int = 100,
+    mean_trade_size: int = 10,
     sigma: float = 0.01,
     mu: float = 0,
 ) -> pd.DataFrame | None:
@@ -71,16 +71,15 @@ def synthetic_intraday(
     volume_samples = np.random.poisson(
         mean_volume / (n_samples - 1), size=(n_samples - 1,)
     )
-    trades_samples = np.round(
-        volume_samples / np.random.poisson(mean_trade_size, size=(n_samples - 1,))
-    )
-
     volume_chunks = volume_samples.reshape(-1, _SYNTHETIC_SAMPLE_RATE)
-    trades_chunks = trades_samples.reshape(-1, _SYNTHETIC_SAMPLE_RATE)
     price_chunks = price_samples[:-1].reshape(-1, _SYNTHETIC_SAMPLE_RATE)
 
     volume = volume_chunks.sum(axis=1)
-    trades = trades_chunks.sum(axis=1)
+    # TODO this is super hacky
+    trades = (
+        (volume / mean_trade_size) * np.random.poisson(1, size=volume.shape)
+    ).astype(int) + 1
+
     vw_price = np.average(price_chunks * volume_chunks, axis=1) / volume
 
     df = pd.DataFrame(
@@ -99,6 +98,6 @@ def synthetic_intraday(
     if not keep_last:
         df = df[:-1]
     df['VOLUME'] = volume
-    df['TRADES'] = trades.astype(int)
+    df['TRADES'] = trades
     df['VW_PRICE'] = vw_price
     return df

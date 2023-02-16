@@ -6,7 +6,6 @@ from abc import abstractproperty
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import numpy as np
 import pandas as pd
 
 from merchant.core.abstract import Observable
@@ -75,11 +74,11 @@ class OrderAfterValuation(BrokerExceptions):
 
 class _MarketMixin:
     @abstractproperty
-    def instruments(self) -> set[Instrument]:
+    def instruments(self) -> list[Instrument]:
         ...
 
     @abstractproperty
-    def trading_pairs(self) -> set[TradingPair]:
+    def trading_pairs(self) -> list[TradingPair]:
         ...
 
 

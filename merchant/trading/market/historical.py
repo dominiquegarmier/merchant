@@ -17,6 +17,7 @@ from merchant.core.numeric import NormedDecimal
 from merchant.data.constants import Aggregates
 from merchant.data.dataset import Dataset
 from merchant.trading.market.base import BaseBroker
+from merchant.trading.market.base import BaseMarketObserver
 from merchant.trading.market.base import InsufficientAssets
 from merchant.trading.market.base import Order
 from merchant.trading.market.base import OrderAfterValuation
@@ -39,220 +40,6 @@ class Candle(NamedTuple):
     VOLUME: float
     TRADES: int
     VW_PRICE: float
-
-
-# methods to edit portfolio
-def _increase_holdings(asset: Asset, portfolio: Portfolio) -> None:
-    balance = _get_holding(asset.instrument, portfolio)
-    _set_holding(balance + asset, portfolio)
-
-
-def _decrease_holdings(asset: Asset, portfolio: Portfolio) -> None:
-    balance = _get_holding(asset.instrument, portfolio)
-    _set_holding(balance - asset, portfolio)
-
-
-def _get_holding(instrument: Instrument, portfolio: Portfolio) -> Asset:
-    if instrument not in portfolio._assets:
-        return 0 * instrument
-    return portfolio._assets[instrument]
-
-
-def _set_holding(asset: Asset, portfolio: Portfolio) -> None:
-    portfolio._assets[asset.instrument] = asset
-
-
-def _log_new_trade(
-    execution: OrderExecution,
-    sold: Asset,
-    bought: Asset,
-    fees: Asset,
-    portfolio: Portfolio,
-) -> None:
-    trade = Trade(
-        sold=sold,
-        bought=bought,
-        fees=fees,
-        execution=execution,
-    )
-    portfolio._trade_histroy.append(trade)
-
-
-def _raise_if_insufficient_assets(
-    assets: Collection[Asset], order: Order, portfolio: Portfolio
-) -> None:
-    asset_dict: dict[Instrument, list[Asset]] = defaultdict(list)
-    for asset in assets:
-        asset_dict[asset.instrument].append(asset)
-    for instrument, assets in asset_dict.items():
-        if portfolio.assets[instrument] < sum(assets, start=0 * instrument):
-            raise InsufficientAssets(order=order)
-
-
-class SlippageModel(Protocol):
-    @abstractmethod
-    def __call__(
-        self, order: Order, quote: NormedDecimal, candle: Candle
-    ) -> NormedDecimal:
-        # retuns adjusted (virtual) quote after slippage
-        ...
-
-
-class FeeModel(Protocol):
-    @abstractmethod
-    def __call__(self, order: Order, quote: NormedDecimal) -> Asset:
-        # returns the base asset costs due to fees
-        ...
-
-
-class MarketEngine(BaseBroker):
-    _dataset: Dataset
-    _portfolio: Portfolio
-
-    _slippage: SlippageModel
-    _fees: FeeModel
-    _aggregate_type: Aggregates
-
-    _locked: pd.Timestamp | None = None
-
-    def __init__(
-        self,
-        dataset: Dataset,
-        assets: Collection[Asset],
-        slippage: SlippageModel,
-        fees: FeeModel,
-    ) -> None:
-        super().__init__()
-        self._dataset = dataset
-        self._portfolio = Portfolio(assets=assets)
-        self._aggregate_type = Aggregates.MIN
-
-        self._fees = fees
-        self._slippage = slippage
-
-    def execute_order(self, order: Order) -> OrderExecution:
-        timestamp = self.clock.time
-
-        # TODO support more complex pairs
-        if order.pair.sell != USD and order.pair.buy != USD:
-            raise NotImplementedError
-
-        # TODO: support more complex pairs
-        is_sell = order.pair.buy == USD
-        instrument = order.pair.sell if is_sell else order.pair.buy
-
-        # get quote and candle to calculate slippage
-        quote = _get_context_consistent_quote(
-            self._dataset,
-            timestamp=timestamp,
-            instrument=instrument,
-            agg=self._aggregate_type,
-            reversed=is_sell,
-        )
-        candle = _get_containing_candle(
-            self._dataset, timestamp=timestamp, instrument=instrument
-        )
-
-        # calculate finaly execution price after slippage and fees
-        slippage_adj_quote = self._slippage(order=order, quote=quote, candle=candle)
-        fees = self._fees(order=order, quote=slippage_adj_quote)
-
-        # check asset balance
-        bought_assets = order.pair.buy * order.quantity
-        sold_assets = order.pair.sell * slippage_adj_quote * order.quantity
-        _raise_if_insufficient_assets(
-            assets=(sold_assets, fees), order=order, portfolio=self._portfolio
-        )
-
-        # create order execution
-        order_execution = OrderExecution(
-            order=order, timestamp=timestamp, rate=slippage_adj_quote, fees=fees
-        )
-
-        # update portfolio
-        # keep track of transaction in portfolio
-        _increase_holdings(asset=bought_assets, portfolio=self._portfolio)
-        _decrease_holdings(asset=sold_assets, portfolio=self._portfolio)
-        _decrease_holdings(asset=fees, portfolio=self._portfolio)
-        # log the trade in the portfolio history
-        _log_new_trade(
-            execution=order_execution,
-            sold=sold_assets,
-            bought=bought_assets,
-            fees=fees,
-            portfolio=self._portfolio,
-        )
-
-        return order_execution
-
-    def _check_lock_or_raise(self, order: Order) -> None:
-        if self._locked is not None and self._locked > self.clock.time:
-            raise OrderAfterValuation(order=order, valuation=self._locked)
-        self._locked = None
-
-    def _calculate_value(self) -> tuple[Valuation, pd.Timestamp]:
-        value: float = 0.0
-        for instrument, asset in self._portfolio.assets.items():
-            candle = _get_containing_candle(
-                self._dataset, timestamp=self.clock.time, instrument=instrument
-            )
-            value += float(asset.quantity) * candle.CLOSE
-            timestamp = candle.TIMESTAMP
-
-        # timestamp of end of candle
-        timestamp = pd.Timestamp(
-            timestamp.value + self._aggregate_type.value * 1_000_000_000
-        )
-        return Valuation(NormedDecimal(value) * USD), timestamp
-
-    def _update_portfolio_value(self) -> Portfolio:
-        '''
-        update value of portfolio and record history
-        this locks the portfolio to trading until the next candle
-        '''
-
-        value, timestamp = self._calculate_value()
-        self._locked = timestamp
-
-        self._portfolio._value = value
-        self._portfolio._value_history[timestamp] = float(value)
-
-        return self._portfolio
-
-    @property
-    def portfolio(self) -> Portfolio:
-        return self._portfolio
-
-    @property
-    def observation_shape(self) -> tuple[int, ...]:
-        raise NotImplementedError
-
-    def get_observation(self) -> np.ndarray:
-        # compute portfolio value
-        self._update_portfolio_value()
-        raise NotImplementedError
-
-    @property
-    def minimum_timestep(self) -> pd.Timedelta:
-        raise NotImplementedError
-        # TODO skip market downtime
-        return pd.Timedelta(self._aggregate_type.value, unit='s')
-
-    @cached_property
-    def trading_pairs(self) -> set[TradingPair]:
-        pairs = set()
-        for instrument in self.instruments:
-            if instrument != USD:
-                pairs.add(instrument / USD)
-                pairs.add(USD / instrument)
-        return pairs
-
-    @cached_property
-    def instruments(self) -> set[Instrument]:
-        tickers = set(self._dataset.tickers)
-        instruments = {Instrument(symbol=ticker, precision=4) for ticker in tickers}
-        instruments.add(USD)
-        return instruments
 
 
 def _get_candle_from_slice(data: pd.DataFrame) -> Candle:
@@ -374,3 +161,297 @@ def _get_context_consistent_quote(
     if reversed:
         return NormedDecimal(1 / _QUOTE_CACHE[instrument])
     return NormedDecimal(_QUOTE_CACHE[instrument])
+
+
+# methods to edit portfolio
+def _increase_holdings(asset: Asset, portfolio: Portfolio) -> None:
+    balance = _get_holding(asset.instrument, portfolio)
+    _set_holding(balance + asset, portfolio)
+
+
+def _decrease_holdings(asset: Asset, portfolio: Portfolio) -> None:
+    balance = _get_holding(asset.instrument, portfolio)
+    _set_holding(balance - asset, portfolio)
+
+
+def _get_holding(instrument: Instrument, portfolio: Portfolio) -> Asset:
+    if instrument not in portfolio._assets:
+        return 0 * instrument
+    return portfolio._assets[instrument]
+
+
+def _set_holding(asset: Asset, portfolio: Portfolio) -> None:
+    portfolio._assets[asset.instrument] = asset
+
+
+def _log_new_trade(
+    execution: OrderExecution,
+    sold: Asset,
+    bought: Asset,
+    fees: Asset,
+    portfolio: Portfolio,
+) -> None:
+    trade = Trade(
+        sold=sold,
+        bought=bought,
+        fees=fees,
+        execution=execution,
+    )
+    portfolio._trade_histroy.append(trade)
+
+
+def _raise_if_insufficient_assets(
+    assets: Collection[Asset], order: Order, portfolio: Portfolio
+) -> None:
+    asset_dict: dict[Instrument, list[Asset]] = defaultdict(list)
+    for asset in assets:
+        asset_dict[asset.instrument].append(asset)
+    for instrument, assets in asset_dict.items():
+        if portfolio.assets[instrument] < sum(assets, start=0 * instrument):
+            raise InsufficientAssets(order=order)
+
+
+class SlippageModel(Protocol):
+    @abstractmethod
+    def __call__(
+        self, order: Order, quote: NormedDecimal, candle: Candle
+    ) -> NormedDecimal:
+        # retuns adjusted (virtual) quote after slippage
+        ...
+
+
+class FeeModel(Protocol):
+    @abstractmethod
+    def __call__(self, order: Order, quote: NormedDecimal) -> Asset:
+        # returns the base asset costs due to fees
+        ...
+
+
+class HistoricalMarketBroker(BaseBroker):
+    _dataset: Dataset
+    _portfolio: Portfolio
+
+    _slippage: SlippageModel
+    _fees: FeeModel
+    _aggregate_type: Aggregates
+
+    _locked: pd.Timestamp | None = None
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        assets: Collection[Asset],
+        slippage: SlippageModel,
+        fees: FeeModel,
+    ) -> None:
+        super().__init__()
+        self._dataset = dataset
+        self._portfolio = Portfolio(assets=assets)
+        self._aggregate_type = Aggregates.MIN
+
+        self._fees = fees
+        self._slippage = slippage
+
+    def execute_order(self, order: Order) -> OrderExecution:
+        timestamp = self.clock.time
+
+        # TODO support more complex pairs
+        if order.pair.sell != USD and order.pair.buy != USD:
+            raise NotImplementedError
+
+        # TODO: support more complex pairs
+        is_sell = order.pair.buy == USD
+        instrument = order.pair.sell if is_sell else order.pair.buy
+
+        # get quote and candle to calculate slippage
+        quote = _get_context_consistent_quote(
+            self._dataset,
+            timestamp=timestamp,
+            instrument=instrument,
+            agg=self._aggregate_type,
+            reversed=is_sell,
+        )
+        candle = _get_containing_candle(
+            self._dataset, timestamp=timestamp, instrument=instrument
+        )
+
+        # calculate finaly execution price after slippage and fees
+        slippage_adj_quote = self._slippage(order=order, quote=quote, candle=candle)
+        fees = self._fees(order=order, quote=slippage_adj_quote)
+
+        # check asset balance
+        bought_assets = order.pair.buy * order.quantity
+        sold_assets = order.pair.sell * slippage_adj_quote * order.quantity
+        _raise_if_insufficient_assets(
+            assets=(sold_assets, fees), order=order, portfolio=self._portfolio
+        )
+
+        # create order execution
+        order_execution = OrderExecution(
+            order=order, timestamp=timestamp, rate=slippage_adj_quote, fees=fees
+        )
+
+        # update portfolio
+        # keep track of transaction in portfolio
+        _increase_holdings(asset=bought_assets, portfolio=self._portfolio)
+        _decrease_holdings(asset=sold_assets, portfolio=self._portfolio)
+        _decrease_holdings(asset=fees, portfolio=self._portfolio)
+        # log the trade in the portfolio history
+        _log_new_trade(
+            execution=order_execution,
+            sold=sold_assets,
+            bought=bought_assets,
+            fees=fees,
+            portfolio=self._portfolio,
+        )
+
+        return order_execution
+
+    def _check_lock_or_raise(self, order: Order) -> None:
+        if self._locked is not None and self._locked > self.clock.time:
+            raise OrderAfterValuation(order=order, valuation=self._locked)
+        self._locked = None
+
+    def _calculate_value(self) -> tuple[Valuation, pd.Timestamp]:
+        value: float = 0.0
+        for instrument, asset in self._portfolio.assets.items():
+            candle = _get_containing_candle(
+                self._dataset, timestamp=self.clock.time, instrument=instrument
+            )
+            value += float(asset.quantity) * candle.CLOSE
+            timestamp = candle.TIMESTAMP
+
+        # timestamp of end of candle
+        timestamp = pd.Timestamp(
+            timestamp.value + self._aggregate_type.value * 1_000_000_000
+        )
+        return Valuation(NormedDecimal(value) * USD), timestamp
+
+    def _update_portfolio_value(self) -> Portfolio:
+        '''
+        update value of portfolio and record history
+        this locks the portfolio to trading until the next candle
+        '''
+
+        value, timestamp = self._calculate_value()
+        self._locked = timestamp
+
+        self._portfolio._value = value
+        self._portfolio._value_history[timestamp] = float(value)
+
+        return self._portfolio
+
+    @property
+    def portfolio(self) -> Portfolio:
+        return self._portfolio
+
+    @property
+    def observation_shape(self) -> tuple[int, int]:
+        return (len(self.instruments), 1)
+
+    def get_observation(self) -> np.ndarray:
+        # compute portfolio value
+        self._update_portfolio_value()
+
+        # TODO more complex observations
+        obs = np.zeros(shape=self.observation_shape)
+        for i, instrument in enumerate(self.instruments):
+            obs[i, :] = [float(self._portfolio.assets[instrument].quantity)]
+        return obs
+
+    @property
+    def minimum_timestep(self) -> pd.Timedelta:
+        raise NotImplementedError
+        # TODO skip market downtime
+        return pd.Timedelta(self._aggregate_type.value, unit='s')
+
+    @cached_property
+    def trading_pairs(self) -> list[TradingPair]:
+        pairs: list[TradingPair] = []
+        for instrument in self.instruments:
+            if instrument != USD:
+                pairs += [instrument / USD, USD / instrument]
+        return pairs
+
+    @cached_property
+    def instruments(self) -> list[Instrument]:
+        tickers = set(self._dataset.tickers)
+        instruments = [Instrument(symbol=ticker, precision=4) for ticker in tickers]
+        instruments.append(USD)
+        return instruments
+
+
+_N_CANDLE_FEATURES = 7
+_DEFAULT_OBSERVATION_WINDOW = 390
+_DEFAULT_ATTENTION_WINDOW = pd.Timedelta(7, unit='d')  # 1 week
+
+
+class HistoricalMarketObserver(BaseMarketObserver):
+    _dataset: Dataset
+
+    _attention_window: pd.Timedelta
+    _attention: pd.DataFrame
+
+    _observation_window: int  # size of the observation sample
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        observation_window: int = _DEFAULT_OBSERVATION_WINDOW,
+        attention_window: pd.Timedelta = _DEFAULT_ATTENTION_WINDOW,
+    ) -> None:
+        super().__init__()
+        self._dataset = dataset
+
+        # sample the initial attention
+        start_time = self.clock.time
+        self._attention_window = attention_window
+        self._attention = self._dataset[
+            start_time - self._attention_window : start_time
+        ]
+
+        self._observation_window = observation_window
+
+    @cached_property
+    def trading_pairs(self) -> list[TradingPair]:
+        pairs: list[TradingPair] = []
+        for instrument in self.instruments:
+            if instrument != USD:
+                pairs += [instrument / USD, USD / instrument]
+        return pairs
+
+    @cached_property
+    def instruments(self) -> list[Instrument]:
+        tickers = set(self._dataset.tickers)
+        instruments = [Instrument(symbol=ticker, precision=4) for ticker in tickers]
+        instruments.append(USD)
+        return instruments
+
+    @property
+    def observation_shape(self) -> tuple[int, int, int]:
+        return (
+            _N_CANDLE_FEATURES,
+            len(self._dataset.tickers),
+            self._observation_window,
+        )
+
+    def get_observation(self) -> np.ndarray:
+        # update attention
+        epsilon = pd.Timedelta(1, unit='ns')
+        self._attention = self._attention.loc[
+            self._attention.index > self.clock.time - self._attention_window
+        ]
+        attn = [
+            self._attention,
+            self._dataset[
+                cast(pd.Timestamp, self._attention.index[-1])  # type: ignore
+                + epsilon : self.clock.time
+            ],
+        ]
+        self._attention = pd.concat(attn, axis=0)
+
+        # TODO more sophisticated sampling (exponential distribution?)
+        # sample the attention to get the correct shape for the observation
+        observation = self._attention.tail(self._observation_window)
+        arrs = [observation[ticker].to_numpy().T for ticker in self._dataset.tickers]
+        return np.stack(arrs, axis=1)

@@ -5,7 +5,6 @@ from collections.abc import Collection
 import numpy as np
 import pandas as pd
 
-from merchant.core.abstract import Observable
 from merchant.core.abstract import TimeDependant
 from merchant.trading.market.base import Trade
 from merchant.trading.tools.asset import Asset
@@ -45,7 +44,7 @@ class Portfolio(TimeDependant):
 
     @property
     def performance(self) -> pd.DataFrame:
-        raise NotImplementedError
+        return self._value_history
 
     @property
     def balance(self) -> Asset:
