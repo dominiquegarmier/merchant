@@ -8,7 +8,7 @@ from typing import TypeVar
 ObsType = TypeVar('ObsType')
 
 
-class BaseObserver(Generic[ObsType], metaclass=ABCMeta):
+class BaseObservationScheme(Generic[ObsType], metaclass=ABCMeta):
     @abstractmethod
     def observe(self) -> ObsType:
         ...

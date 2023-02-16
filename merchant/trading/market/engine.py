@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import random
+from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Collection
-from decimal import Decimal
+from functools import cached_property
 from typing import cast
 from typing import NamedTuple
 from typing import Protocol
 
+import numpy as np
 import pandas as pd
 from pyarrow import dataset as ds
 
@@ -15,7 +17,6 @@ from merchant.core.numeric import NormedDecimal
 from merchant.data.constants import Aggregates
 from merchant.data.dataset import Dataset
 from merchant.trading.market.base import BaseBroker
-from merchant.trading.market.base import BaseMarketData
 from merchant.trading.market.base import InsufficientAssets
 from merchant.trading.market.base import Order
 from merchant.trading.market.base import OrderAfterValuation
@@ -89,6 +90,7 @@ def _raise_if_insufficient_assets(
 
 
 class SlippageModel(Protocol):
+    @abstractmethod
     def __call__(
         self, order: Order, quote: NormedDecimal, candle: Candle
     ) -> NormedDecimal:
@@ -97,6 +99,7 @@ class SlippageModel(Protocol):
 
 
 class FeeModel(Protocol):
+    @abstractmethod
     def __call__(self, order: Order, quote: NormedDecimal) -> Asset:
         # returns the base asset costs due to fees
         ...
@@ -105,7 +108,6 @@ class FeeModel(Protocol):
 class MarketEngine(BaseBroker):
     _dataset: Dataset
     _portfolio: Portfolio
-    _pairs: set[TradingPair]
 
     _slippage: SlippageModel
     _fees: FeeModel
@@ -203,7 +205,7 @@ class MarketEngine(BaseBroker):
         )
         return Valuation(NormedDecimal(value) * USD), timestamp
 
-    def update_portfolio(self) -> Portfolio:
+    def _update_portfolio_value(self) -> Portfolio:
         '''
         update value of portfolio and record history
         this locks the portfolio to trading until the next candle
@@ -218,18 +220,39 @@ class MarketEngine(BaseBroker):
         return self._portfolio
 
     @property
+    def portfolio(self) -> Portfolio:
+        return self._portfolio
+
+    @property
+    def observation_shape(self) -> tuple[int, ...]:
+        raise NotImplementedError
+
+    def get_observation(self) -> np.ndarray:
+        # compute portfolio value
+        self._update_portfolio_value()
+        raise NotImplementedError
+
+    @property
     def minimum_timestep(self) -> pd.Timedelta:
+        raise NotImplementedError
+        # TODO skip market downtime
         return pd.Timedelta(self._aggregate_type.value, unit='s')
 
+    @cached_property
+    def trading_pairs(self) -> set[TradingPair]:
+        pairs = set()
+        for instrument in self.instruments:
+            if instrument != USD:
+                pairs.add(instrument / USD)
+                pairs.add(USD / instrument)
+        return pairs
 
-# TODO remove this
-class HistoricalMarketData(BaseMarketData):
-    _dataset: Dataset
-    _portfolio: Portfolio
-
-    def __init__(self, dataset: Dataset) -> None:
-        super().__init__()
-        self._dataset = dataset
+    @cached_property
+    def instruments(self) -> set[Instrument]:
+        tickers = set(self._dataset.tickers)
+        instruments = {Instrument(symbol=ticker, precision=4) for ticker in tickers}
+        instruments.add(USD)
+        return instruments
 
 
 def _get_candle_from_slice(data: pd.DataFrame) -> Candle:

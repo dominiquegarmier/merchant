@@ -12,7 +12,7 @@ import numpy as np
 if TYPE_CHECKING:
     from merchant.environment.base.components import (
         BaseRewardScheme,
-        BaseObserver,
+        BaseObservationScheme,
         BaseActionScheme,
         BaseRenderer,
     )
@@ -24,13 +24,13 @@ ActType: TypeAlias = np.ndarray
 class TradingEnvAbstract(gym.Env[ObsType, ActType], metaclass=ABCMeta):
     _reward_scheme: BaseRewardScheme
     _action_scheme: BaseActionScheme[ActType]
-    _observer: BaseObserver[ObsType]
+    _observer: BaseObservationScheme[ObsType]
     _renderer: BaseRenderer
 
     def __init__(
         self,
         reward_schema: type[BaseRewardScheme],
-        observer: type[BaseObserver],
+        observer: type[BaseObservationScheme],
         action_scheme: type[BaseActionScheme],
         renderer: type[BaseRenderer],
     ) -> None:

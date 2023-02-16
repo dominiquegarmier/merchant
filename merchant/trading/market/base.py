@@ -6,12 +6,16 @@ from abc import abstractproperty
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
+from merchant.core.abstract import Observable
 from merchant.core.abstract import TimeDependant
 from merchant.core.numeric import NormedDecimal
 from merchant.trading.tools.asset import Asset
+from merchant.trading.tools.instrument import Instrument
 from merchant.trading.tools.pair import TradingPair
+
 
 if TYPE_CHECKING:
     from merchant.trading.market.portfolio import Portfolio
@@ -69,37 +73,31 @@ class OrderAfterValuation(BrokerExceptions):
         self._order = order
 
 
-class BaseMarketData(TimeDependant, metaclass=ABCMeta):
-    def __init__(self) -> None:
-        super().__init__()
+class _MarketMixin:
+    @abstractproperty
+    def instruments(self) -> set[Instrument]:
+        ...
 
     @abstractproperty
     def trading_pairs(self) -> set[TradingPair]:
         ...
 
-    @abstractmethod
-    def get_quote(self, pair: TradingPair) -> Quote:
-        ...
 
-    @abstractmethod
-    def get_history(self, window: int, pair: TradingPair | None = None) -> pd.DataFrame:
-        ...
-
-
-class BaseBroker(TimeDependant, metaclass=ABCMeta):
+class BaseMarketObserver(TimeDependant, Observable, _MarketMixin, metaclass=ABCMeta):
     def __init__(self) -> None:
         super().__init__()
 
-    @abstractproperty
-    def trading_pairs(self) -> set[TradingPair]:
-        ...
+
+class BaseBroker(TimeDependant, Observable, _MarketMixin, metaclass=ABCMeta):
+    def __init__(self) -> None:
+        super().__init__()
 
     @abstractmethod
     def execute_order(self, order: Order) -> OrderExecution | None:
         ...
 
-    @abstractmethod
-    def update_portfolio(self) -> Portfolio:
+    @abstractproperty
+    def portfolio(self) -> Portfolio:
         ...
 
     @abstractproperty

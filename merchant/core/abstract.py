@@ -2,12 +2,24 @@ from __future__ import annotations
 
 from abc import ABCMeta
 from abc import abstractmethod
+from abc import abstractproperty
 from logging import getLogger
 from types import TracebackType
 
+import numpy as np
 import pandas as pd
 
 logger = getLogger(__name__)
+
+
+class Observable(metaclass=ABCMeta):
+    @abstractproperty
+    def observation_shape(self) -> tuple[int, ...]:
+        ...
+
+    @abstractmethod
+    def get_observation(self) -> np.ndarray:
+        ...
 
 
 class Identifiable(metaclass=ABCMeta):

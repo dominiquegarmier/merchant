@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
+import numpy as np
 import pandas as pd
 
+from merchant.core.abstract import Observable
 from merchant.core.abstract import TimeDependant
 from merchant.trading.market.base import Trade
 from merchant.trading.tools.asset import Asset
