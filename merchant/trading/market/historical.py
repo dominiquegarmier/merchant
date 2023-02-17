@@ -12,7 +12,6 @@ from typing import Protocol
 
 import numpy as np
 import pandas as pd
-from pyarrow import dataset as ds
 
 from merchant.core.numeric import NormedDecimal
 from merchant.data.constants import Aggregates
@@ -117,51 +116,6 @@ def _get_context_consistent_quote(
 
 
 # methods to edit portfolio
-def _get_holding(instrument: Instrument, portfolio: Portfolio) -> Asset:
-    if instrument not in portfolio._assets:
-        return 0 * instrument
-    return portfolio._assets[instrument]
-
-
-def _set_holding(asset: Asset, portfolio: Portfolio) -> None:
-    portfolio._assets[asset.instrument] = asset
-
-
-def _increase_holdings(asset: Asset, portfolio: Portfolio) -> None:
-    balance = _get_holding(asset.instrument, portfolio)
-    _set_holding(balance + asset, portfolio)
-
-
-def _decrease_holdings(asset: Asset, portfolio: Portfolio) -> None:
-    balance = _get_holding(asset.instrument, portfolio)
-    _set_holding(balance - asset, portfolio)
-
-
-def _log_new_trade(
-    execution: OrderExecution,
-    sold: Asset,
-    bought: Asset,
-    fees: Asset,
-    portfolio: Portfolio,
-) -> None:
-    trade = Trade(
-        sold=sold,
-        bought=bought,
-        fees=fees,
-        execution=execution,
-    )
-    portfolio._trade_histroy.append(trade)
-
-
-def _raise_if_insufficient_assets(
-    assets: Collection[Asset], order: Order, portfolio: Portfolio
-) -> None:
-    asset_dict: dict[Instrument, list[Asset]] = defaultdict(list)
-    for asset in assets:
-        asset_dict[asset.instrument].append(asset)
-    for instrument, assets in asset_dict.items():
-        if portfolio.assets[instrument] < sum(assets, start=0 * instrument):
-            raise InsufficientAssets(order=order)
 
 
 class SlippageModel(Protocol):
@@ -188,8 +142,8 @@ def _no_fees(order: Order, quote: NormedDecimal) -> Asset:
     return 0 * USD
 
 
-_NO_FEES = _no_fees
-_NO_SLIPPAGE = _no_slippage
+_NO_SLIPPAGE: SlippageModel = _no_slippage
+_NO_FEES: FeeModel = _no_fees
 
 
 class HistoricalMarketBroker(BaseBroker):
@@ -259,8 +213,10 @@ class HistoricalMarketBroker(BaseBroker):
         return instruments
 
     def execute_order(self, order: Order) -> OrderExecution:
-        timestamp = self.clock.time
+        # check if locked
+        self._raise_if_locked(order=order)
 
+        timestamp = self.clock.time
         # TODO support more complex pairs
         if order.pair.sell != USD and order.pair.buy != USD:
             raise NotImplementedError
@@ -287,9 +243,7 @@ class HistoricalMarketBroker(BaseBroker):
         # check asset balance
         bought_assets = order.pair.buy * order.quantity
         sold_assets = order.pair.sell * slippage_adj_quote * order.quantity
-        _raise_if_insufficient_assets(
-            assets=(sold_assets, fees), order=order, portfolio=self._portfolio
-        )
+        self._raise_if_insufficient_assets(assets=(sold_assets, fees), order=order)
 
         # create order execution
         order_execution = OrderExecution(
@@ -298,17 +252,17 @@ class HistoricalMarketBroker(BaseBroker):
 
         # update portfolio
         # keep track of transaction in portfolio
-        _increase_holdings(asset=bought_assets, portfolio=self._portfolio)
-        _decrease_holdings(asset=sold_assets, portfolio=self._portfolio)
-        _decrease_holdings(asset=fees, portfolio=self._portfolio)
+        self._increase_holdings(asset=bought_assets)
+        self._decrease_holdings(asset=sold_assets)
+        self._decrease_holdings(asset=fees)
         # log the trade in the portfolio history
-        _log_new_trade(
-            execution=order_execution,
+        trade = Trade(
             sold=sold_assets,
             bought=bought_assets,
             fees=fees,
-            portfolio=self._portfolio,
+            execution=order_execution,
         )
+        self._portfolio._trade_histroy.append(trade)
 
         return order_execution
 
@@ -326,10 +280,20 @@ class HistoricalMarketBroker(BaseBroker):
             obs[i, :] = [float(self._portfolio.assets[instrument].quantity)]
         return obs
 
-    def _check_lock_or_raise(self, order: Order) -> None:
+    def _raise_if_locked(self, order: Order) -> None:
         if self._locked is not None and self._locked > self.clock.time:
             raise OrderAfterValuation(order=order, valuation=self._locked)
         self._locked = None
+
+    def _raise_if_insufficient_assets(
+        self, assets: Collection[Asset], order: Order
+    ) -> None:
+        asset_dict: dict[Instrument, list[Asset]] = defaultdict(list)
+        for asset in assets:
+            asset_dict[asset.instrument].append(asset)
+        for instrument, assets in asset_dict.items():
+            if self._portfolio.assets[instrument] < sum(assets, start=0 * instrument):
+                raise InsufficientAssets(order=order)
 
     def _next_slice(self) -> tuple[pd.Timestamp, pd.Series] | None:
         try:
@@ -375,40 +339,41 @@ class HistoricalMarketBroker(BaseBroker):
 
         return self._portfolio
 
+    def _get_holding(self, instrument: Instrument) -> Asset:
+        if instrument not in self._portfolio._assets:
+            return 0 * instrument
+        return self._portfolio._assets[instrument]
+
+    def _set_holding(self, asset: Asset) -> None:
+        self._portfolio._assets[asset.instrument] = asset
+
+    def _increase_holdings(self, asset: Asset) -> None:
+        balance = self._get_holding(asset.instrument)
+        self._set_holding(balance + asset)
+
+    def _decrease_holdings(self, asset: Asset) -> None:
+        balance = self._get_holding(asset.instrument)
+        self._set_holding(balance - asset)
+
 
 _N_CANDLE_FEATURES = 7
-_DEFAULT_OBSERVATION_WINDOW = 390
-_DEFAULT_ATTENTION_WINDOW = pd.Timedelta(7, unit='d')  # 1 week
+_DEFAULT_OBSERVATION_WINDOW = 512
 
 
 class HistoricalMarketObserver(BaseMarketObserver):
     _dataset: Dataset
-
-    _attention_window: pd.Timedelta
-    _attention: pd.DataFrame
-
-    _observation_window: int  # size of the observation sample
-
+    _observation_window: int
     _aggregate_type: Aggregates
 
     def __init__(
         self,
         dataset: Dataset,
         observation_window: int = _DEFAULT_OBSERVATION_WINDOW,
-        attention_window: pd.Timedelta = _DEFAULT_ATTENTION_WINDOW,
     ) -> None:
         super().__init__()
         self._dataset = dataset
-
-        # sample the initial attention
-        start_time = self.clock.time
-        self._attention_window = attention_window
-        self._attention = self._dataset[
-            start_time - self._attention_window : start_time  # type: ignore
-        ]
-
-        self._observation_window = observation_window
         self._aggregate_type = Aggregates.MIN
+        self._observation_window = observation_window
 
     @property
     def resolution(self) -> pd.Timedelta:
@@ -439,18 +404,10 @@ class HistoricalMarketObserver(BaseMarketObserver):
 
     def get_observation(self) -> np.ndarray:
         # update attention
-        epsilon = pd.Timedelta(1, unit='ns')
-        self._attention = self._attention.loc[
-            self._attention.index > self.clock.time - self._attention_window
-        ]
-        attn = [
-            self._attention,
-            self._dataset[self._attention.index[-1] + epsilon : self.clock.time],  # type: ignore
-        ]
-        self._attention = pd.concat(attn, axis=0)
-
-        # TODO more sophisticated sampling (exponential distribution?)
-        # sample the attention to get the correct shape for the observation
-        observation = self._attention.tail(self._observation_window)
-        arrs = [observation[ticker].to_numpy().T for ticker in self._dataset.tickers]
+        window = self._dataset.get(
+            timestamp=self.clock.time - self.resolution,  # type: ignore
+            num=self._observation_window,
+            method='left',
+        )
+        arrs = [window[ticker].to_numpy().T for ticker in self._dataset.tickers]
         return np.stack(arrs, axis=1)
