@@ -147,5 +147,10 @@ class TimeDependant(metaclass=ABCMeta):
         self._clock = _CONTEXT_CLOCK or _DEFAULT_CLOCK
 
     @property
-    def clock(self):
+    def resolution(self) -> pd.Timedelta:
+        '''(smallest) supported timestep resolution for simulation'''
+        return pd.Timedelta(0)
+
+    @property
+    def clock(self) -> Clock:
         return self._clock

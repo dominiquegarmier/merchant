@@ -6,11 +6,13 @@ from abc import ABCMeta
 from abc import abstractmethod
 from abc import abstractproperty
 from collections.abc import Collection
+from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 from typing import cast
+from typing import Literal
 
 import exchange_calendars as xcals
 import pandas as pd
@@ -37,7 +39,24 @@ class Dataset(metaclass=ABCMeta):
         ...
 
     @abstractmethod
-    def __getitem__(self, s: slice) -> pd.DataFrame:
+    def slice(
+        self, from_: pd.Timestamp | None = None, to_: pd.Timestamp | None = None
+    ) -> pd.DataFrame:
+        ...
+
+    @abstractmethod
+    def range(
+        self, from_: pd.Timestamp | None = None, to_: pd.Timestamp | None = None
+    ) -> Generator[tuple[pd.Timestamp, pd.Series], None, None]:
+        ...
+
+    @abstractmethod
+    def get(
+        self,
+        timestamp: pd.Timestamp,
+        num: int = 1,
+        method: Literal['left', 'right'] = 'left',
+    ) -> pd.DataFrame:
         ...
 
 
@@ -116,6 +135,7 @@ def _validate_datetime_slice(s: slice) -> tuple[datetime, datetime]:
     return start, stop
 
 
+# TODO update this to use the new dataset API
 class ParquetDataset(Dataset):
     _pyarrow_dataset: ds.Dataset
     _filter: pa.Expression | None = None
@@ -227,6 +247,41 @@ class SyntheticDataset(Dataset):
         self._end = end
         self._data = self._gen_data(tickers if isinstance(tickers, dict) else None)
 
+    def slice(
+        self, from_: pd.Timestamp | None = None, to_: pd.Timestamp | None = None
+    ) -> pd.DataFrame:
+        from_ts = from_ if from_ is not None else pd.Timestamp.min
+        to_ts = to_ if to_ is not None else pd.Timestamp.max
+        return cast(
+            pd.DataFrame,
+            self._data.loc[(self._data.index >= from_ts) & (self._data.index <= to_ts)],
+        )
+
+    def range(
+        self, from_: pd.Timestamp | None = None, to_: pd.Timestamp | None = None
+    ) -> Generator[tuple[pd.Timestamp, pd.Series], None, None]:
+        for index, row in self.slice(from_, to_).iterrows():
+            yield cast(pd.Timestamp, index), row
+
+    def get(
+        self,
+        timestamp: pd.Timestamp,
+        num: int = 1,
+        method: Literal['left', 'right'] = 'left',
+    ) -> pd.DataFrame:
+        if method == 'left':
+            return cast(
+                pd.DataFrame, self._data.loc[self._data.index <= timestamp].tail(num)
+            )
+        elif method == 'right':
+            return cast(
+                pd.DataFrame, self._data.loc[self._data.index >= timestamp].head(num)
+            )
+
+    @property
+    def tickers(self) -> list[str]:
+        return self._tickers
+
     def _gen_data(self, start_prices: dict[str, float] | None = None) -> pd.DataFrame:
         xnys = xcals.get_calendar('XNYS')  # NYSE
         trading_days: list[str] = xnys.sessions_in_range(
@@ -262,17 +317,6 @@ class SyntheticDataset(Dataset):
             ticker_data[ticker] = pd.concat(days)
         return pd.concat(ticker_data, axis=1)
 
-    def __getitem__(self, s: slice) -> pd.DataFrame:
-        start, stop = _validate_datetime_slice(s)
-        return cast(
-            pd.DataFrame,
-            self._data.loc[(self._data.index <= stop) & (self._data.index >= start)],
-        )
-
-    @property
-    def tickers(self) -> list[str]:
-        return self._tickers
-
 
 def registerd_datasets() -> list[str]:
     return list(_DATASET_REGISTRY.keys())
@@ -281,7 +325,7 @@ def registerd_datasets() -> list[str]:
 def load_dataset(name: str) -> Dataset:
     if name not in _DATASET_REGISTRY:
         raise ValueError(f'dataset {name} not registered')
-    return ParquetDataset(metadata=_DATASET_REGISTRY[name])
+    return ParquetDataset(metadata=_DATASET_REGISTRY[name])  # type: ignore
 
 
 __all__ = [

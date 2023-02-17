@@ -100,14 +100,9 @@ class BaseBroker(TimeDependant, Observable, _MarketMixin, metaclass=ABCMeta):
         ...
 
     @abstractproperty
-    def minimum_timestep(self) -> pd.Timedelta:
+    def skip(self) -> pd.Timedelta:
         '''
-        this timestep must ensure that the broker can execute orders again after a valuation
-        it also makes sure that execution prices are consistent between two steps (i.e when
-        using historical data this must be greater than the aggregates durations)
-
-        example:
-        - a realtime broker might have a minimum timestep of 0 seconds
-        - a (historical data) broker using 1 minute candles must have a minimum timestep of 1 minute or greater
+        how much time to skip until the next simulation step (on top of the resolution)
+        i.e. to account for market downtime (breaks, weekends, etc.)
         '''
         ...
