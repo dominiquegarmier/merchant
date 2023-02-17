@@ -6,16 +6,15 @@ from typing import TYPE_CHECKING
 from typing import TypeAlias
 from typing import TypeVar
 
-import gym
+import gymnasium as gym
 import numpy as np
 
 if TYPE_CHECKING:
-    from merchant.environment.base.components import (
-        BaseRewardScheme,
-        BaseObservationScheme,
-        BaseActionScheme,
-        BaseRenderer,
-    )
+    from merchant.environment.base.components import BaseRewardScheme
+    from merchant.environment.base.components import BaseObservationScheme
+    from merchant.environment.base.components import BaseActionScheme
+    from merchant.environment.base.components import BaseRenderer
+
 
 ObsType: TypeAlias = np.ndarray
 ActType: TypeAlias = np.ndarray
@@ -27,6 +26,7 @@ class TradingEnvAbstract(gym.Env[ObsType, ActType], metaclass=ABCMeta):
     _observer: BaseObservationScheme[ObsType]
     _renderer: BaseRenderer
 
+    @abstractmethod
     def __init__(
         self,
         reward_schema: type[BaseRewardScheme],

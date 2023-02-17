@@ -81,9 +81,9 @@ class Clock(metaclass=ABCMeta):
 
     def __exit__(
         self,
-        tp: type[BaseException] | None,
-        inst: BaseException | None,
-        tb: TracebackType | None,
+        tp: type[BaseException] | None = None,
+        inst: BaseException | None = None,
+        tb: TracebackType | None = None,
     ) -> bool | None:
         # mark the clock as stopped
         self._stopped_at = self.time
