@@ -75,11 +75,11 @@ class OrderAfterValuation(BrokerExceptions):
 class _MarketMixin:
     @abstractproperty
     def instruments(self) -> list[Instrument]:
-        ...
+        raise NotImplementedError
 
     @abstractproperty
-    def trading_pairs(self) -> list[TradingPair]:
-        ...
+    def pairs(self) -> list[TradingPair]:
+        raise NotImplementedError
 
 
 class BaseMarketObserver(TimeDependant, Observable, _MarketMixin, metaclass=ABCMeta):
@@ -93,11 +93,11 @@ class BaseBroker(TimeDependant, Observable, _MarketMixin, metaclass=ABCMeta):
 
     @abstractmethod
     def execute_order(self, order: Order) -> OrderExecution | None:
-        ...
+        raise NotImplementedError
 
     @abstractproperty
     def portfolio(self) -> Portfolio:
-        ...
+        raise NotImplementedError
 
     @abstractproperty
     def skip(self) -> pd.Timedelta:
@@ -105,4 +105,16 @@ class BaseBroker(TimeDependant, Observable, _MarketMixin, metaclass=ABCMeta):
         how much time to skip until the next simulation step (on top of the resolution)
         i.e. to account for market downtime (breaks, weekends, etc.)
         '''
-        ...
+        raise NotImplementedError
+
+    @abstractproperty
+    def open(self) -> bool:
+        raise NotImplementedError
+
+    @abstractproperty
+    def open_pairs(self) -> list[TradingPair]:
+        raise NotImplementedError
+
+    @abstractproperty
+    def next_open(self) -> pd.Timestamp | None:
+        raise NotImplementedError

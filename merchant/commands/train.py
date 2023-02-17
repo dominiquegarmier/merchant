@@ -5,7 +5,7 @@ from typing import Any
 
 import exchange_calendars as xcals
 import pandas as pd
-from ray.rllib.algorithms import ppo
+from ray.rllib.algorithms import ppo  # this causes deprecation warning
 from ray.tune.registry import register_env
 from tqdm import tqdm
 
@@ -33,9 +33,7 @@ register_env('trading_env', env_creator)
 
 
 def train() -> int:
-    ppo_config = ppo.PPOConfig().framework('torch')
-    algo = ppo.PPO(config=ppo_config, env='trading_env')
-
+    algo = ppo.PPOConfig().framework('torch').environment('trading_env').build()
     for _ in tqdm(range(5)):
         res = algo.train()
         pprint(res)

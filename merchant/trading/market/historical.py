@@ -10,8 +10,10 @@ from typing import cast
 from typing import NamedTuple
 from typing import Protocol
 
+import exchange_calendars as xcals
 import numpy as np
 import pandas as pd
+from exchange_calendars import ExchangeCalendar
 
 from merchant.core.numeric import NormedDecimal
 from merchant.data.constants import Aggregates
@@ -73,14 +75,14 @@ _QUOTE_CACHE: dict[Instrument, float] = {}
 
 
 def _randomized_interpolated_quote(
-    candle: Candle, timestamp: pd.Timestamp, agg: Aggregates
+    candle: Candle, timestamp: pd.Timestamp, timeframe: pd.Timedelta
 ) -> float:
     '''
     get a random value of a realistic quote, based on a candle and the relative time rel_time in [0, 1]
     '''
     start, open, high, low, close, _, _, _ = candle
     ts_start = start.value
-    ts_end = start.value + agg.value * 1_000_000_000
+    ts_end = start.value + timeframe.value
 
     rel_time = (timestamp.value - ts_start) / (ts_end - ts_start)
 
@@ -96,7 +98,7 @@ def _get_context_consistent_quote(
     candle: Candle,
     timestamp: pd.Timestamp,
     instrument: Instrument,
-    agg: Aggregates,
+    timeframe: pd.Timedelta,
     reversed: bool = False,
 ) -> NormedDecimal:
     global _QUOTE_CACHE
@@ -108,7 +110,7 @@ def _get_context_consistent_quote(
 
     if instrument not in _QUOTE_CACHE:
         _QUOTE_CACHE[instrument] = _randomized_interpolated_quote(
-            candle, timestamp, agg
+            candle, timestamp, timeframe
         )
     if reversed:
         return NormedDecimal(1 / _QUOTE_CACHE[instrument])
@@ -144,6 +146,7 @@ def _no_fees(order: Order, quote: NormedDecimal) -> Asset:
 
 _NO_SLIPPAGE: SlippageModel = _no_slippage
 _NO_FEES: FeeModel = _no_fees
+_XNYS_CALENDAR = xcals.get_calendar('XNYS')  # NYSE
 
 
 class HistoricalMarketBroker(BaseBroker):
@@ -152,7 +155,9 @@ class HistoricalMarketBroker(BaseBroker):
 
     _slippage: SlippageModel
     _fees: FeeModel
-    _aggregate_type: Aggregates
+    _timeframe: pd.Timedelta
+
+    _calendar: ExchangeCalendar  # TODO support more than one calendar, first we need to support more than one exchange
 
     _locked: pd.Timestamp | None = None
 
@@ -164,6 +169,7 @@ class HistoricalMarketBroker(BaseBroker):
         self,
         dataset: Dataset,
         assets: Collection[Asset],
+        calendar: ExchangeCalendar = _XNYS_CALENDAR,
         slippage: SlippageModel = _NO_SLIPPAGE,
         fees: FeeModel = _NO_FEES,
     ) -> None:
@@ -175,17 +181,8 @@ class HistoricalMarketBroker(BaseBroker):
         self._slippage = slippage
 
         # get the first data slice
-        self._aggregate_type = Aggregates.MIN
-        self._slice_iter = self._dataset.range(from_=self.clock.time - self.resolution)  # type: ignore
-        try:
-            self._timestamp_slice = next(self._slice_iter)
-        except StopIteration:
-            raise ValueError('dataset is empty')
-        self._next_timestamp_slice = self._next_slice()
-
-    @property
-    def resolution(self) -> pd.Timedelta:
-        return pd.Timedelta(self._aggregate_type.value, unit='s')
+        self._calendar = calendar
+        self._timeframe = pd.Timedelta(60, unit='s')  # TODO generalize
 
     @property
     def portfolio(self) -> Portfolio:
@@ -198,7 +195,7 @@ class HistoricalMarketBroker(BaseBroker):
         return self._next_timestamp_slice[0] - self._timestamp_slice[0]
 
     @cached_property
-    def trading_pairs(self) -> list[TradingPair]:
+    def pairs(self) -> list[TradingPair]:
         pairs: list[TradingPair] = []
         for instrument in self.instruments:
             if instrument != USD:
@@ -211,6 +208,24 @@ class HistoricalMarketBroker(BaseBroker):
         instruments = [Instrument(symbol=ticker, precision=4) for ticker in tickers]
         instruments.append(USD)
         return instruments
+
+    @property
+    def open(self) -> bool:
+        return self._calendar.is_open_at_time(  # type: ignore
+            timestamp=self.clock.time, side='neither'
+        )
+
+    @property
+    def open_pairs(self) -> list[TradingPair]:
+        if self.open:
+            return self.pairs
+        return []
+
+    @property
+    def next_open(self) -> pd.Timestamp | None:
+        if not self.open:
+            return self._calendar.next_open(self.clock.time)  # type: ignore
+        return None
 
     def execute_order(self, order: Order) -> OrderExecution:
         # check if locked
@@ -232,7 +247,7 @@ class HistoricalMarketBroker(BaseBroker):
             candle=candle,
             timestamp=timestamp,
             instrument=instrument,
-            agg=self._aggregate_type,
+            timeframe=self._timeframe,
             reversed=is_sell,
         )
 
@@ -295,19 +310,12 @@ class HistoricalMarketBroker(BaseBroker):
             if self._portfolio.assets[instrument] < sum(assets, start=0 * instrument):
                 raise InsufficientAssets(order=order)
 
-    def _next_slice(self) -> tuple[pd.Timestamp, pd.Series] | None:
-        try:
-            return next(self._slice_iter)
-        except StopIteration:
-            return None
-
     def _get_slice(self) -> tuple[pd.Timestamp, pd.Series]:
-        while self.clock.time >= self._timestamp_slice[0] + self.resolution:
-            if self._next_timestamp_slice is None:
-                raise ValueError('dataset is empty')
-            self._timestamp_slice = self._next_timestamp_slice
-            self._next_timestamp_slice = self._next_slice()
-        return self._timestamp_slice
+        data_slice = self._dataset.get(self._clock.time)
+        return (
+            cast(pd.Timestamp, data_slice.index[0]),
+            cast(pd.Series, data_slice.iloc[0]),
+        )
 
     def _calculate_value(self) -> tuple[Valuation, pd.Timestamp]:
         value = 0.0
@@ -317,12 +325,8 @@ class HistoricalMarketBroker(BaseBroker):
                 timestamp=timestamp, data=data[instrument.symbol]
             )
             value += float(asset.quantity) * candle.CLOSE
-            timestamp = candle.TIMESTAMP
+            timestamp = candle.TIMESTAMP + self._timeframe  # end of candle
 
-        # timestamp of end of candle
-        timestamp = pd.Timestamp(
-            timestamp.value + self._aggregate_type.value * 1_000_000_000
-        )
         return Valuation(NormedDecimal(value) * USD), timestamp
 
     def _update_portfolio_value(self) -> Portfolio:
@@ -364,6 +368,7 @@ class HistoricalMarketObserver(BaseMarketObserver):
     _dataset: Dataset
     _observation_window: int
     _aggregate_type: Aggregates
+    _timeframe: pd.Timedelta
 
     def __init__(
         self,
@@ -372,15 +377,11 @@ class HistoricalMarketObserver(BaseMarketObserver):
     ) -> None:
         super().__init__()
         self._dataset = dataset
-        self._aggregate_type = Aggregates.MIN
+        self._timeframe = pd.Timedelta(60, unit='s')  # TODO generalize
         self._observation_window = observation_window
 
-    @property
-    def resolution(self) -> pd.Timedelta:
-        return pd.Timedelta(self._aggregate_type.value, unit='s')
-
     @cached_property
-    def trading_pairs(self) -> list[TradingPair]:
+    def pairs(self) -> list[TradingPair]:
         pairs: list[TradingPair] = []
         for instrument in self.instruments:
             if instrument != USD:
@@ -405,7 +406,7 @@ class HistoricalMarketObserver(BaseMarketObserver):
     def get_observation(self) -> np.ndarray:
         # update attention
         window = self._dataset.get(
-            timestamp=self.clock.time - self.resolution,  # type: ignore
+            timestamp=self.clock.time - self._timeframe,  # type: ignore
             num=self._observation_window,
             method='left',
         )

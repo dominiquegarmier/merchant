@@ -28,6 +28,7 @@ class TradingEnv(gym.Env[ObsType, ActType]):
     _clock: VirutalClock
     _start: pd.Timestamp
     _end: pd.Timestamp
+    _step: pd.Timedelta
     _initial_money: int
 
     _dataset: SyntheticDataset
@@ -41,12 +42,14 @@ class TradingEnv(gym.Env[ObsType, ActType]):
         start_time: pd.Timestamp,
         end_time: pd.Timestamp,
         dataset: SyntheticDataset,
+        step_size: pd.Timedelta = pd.Timedelta(60, unit='s'),
         initial_money: int = 10_000,
     ) -> None:
         super().__init__()
 
         self._start = start_time
         self._end = end_time
+        self._step = step_size
         self._initial_money = initial_money
         self._dataset = dataset
 
@@ -69,6 +72,7 @@ class TradingEnv(gym.Env[ObsType, ActType]):
     def step(
         self, action: ActType
     ) -> tuple[ObsType, float, bool, bool, dict[str, Any]]:
+        # TODO: move to AcitonScheme
         timestamp = self._clock.time
         order: Order | None = None
         if float(action) < 0:
@@ -87,13 +91,22 @@ class TradingEnv(gym.Env[ObsType, ActType]):
         if order is not None:
             self._broker.execute_order(order=order)
 
+        # TODO move to Stepper
+        n_steps = 1
+        if not self._broker.open:
+            next_open = self._broker.next_open
+            assert next_open is not None, 'the world is ending'
+            n_steps += (next_open - self._clock.time) // self._step
+
+        self._clock.step(delta=n_steps * self._step)
+        completed = self._clock.time >= self._end
+
+        # TODO move to ObservationScheme
         portfolio_obs = self._broker.get_observation()
         market_obs = self._observer.get_observation()
-
         observation = np.concatenate((portfolio_obs.flatten(), market_obs.flatten()))
-        self._clock.step(delta=self._broker.skip + self._broker.resolution)
 
-        # TODO very naiv reward function
+        # TODO move to RewardScheme
         new_value = self._broker.portfolio.value
         if new_value is not None:
             reward = float(new_value) - self._previous_value
@@ -101,14 +114,12 @@ class TradingEnv(gym.Env[ObsType, ActType]):
         else:
             reward = 0.0
 
-        completed = self._clock.time >= self._end
-        truncated = False  # early termination
         info = {
             'timestamp': timestamp,
             'orders': [order] if order is not None else [],
         }
 
-        return (observation, reward, completed, truncated, info)
+        return (observation, reward, completed, False, info)
 
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
@@ -130,6 +141,5 @@ class TradingEnv(gym.Env[ObsType, ActType]):
         portfolio_obs = self._broker.get_observation()
         market_obs = self._observer.get_observation()
         observation = np.concatenate((portfolio_obs.flatten(), market_obs.flatten()))
-        self._clock.step(delta=self._broker.skip + self._broker.resolution)
 
         return (observation, {})
