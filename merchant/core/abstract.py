@@ -54,7 +54,7 @@ class Clock(metaclass=ABCMeta):
     def time(self) -> pd.Timestamp:
         if self._stopped is not None:
             return self._stopped_at  # type: ignore
-        return self._get_time()
+        return self._time()
 
     @property
     def started_at(self) -> pd.Timestamp:
@@ -70,6 +70,10 @@ class Clock(metaclass=ABCMeta):
 
     @abstractmethod
     def _time(self) -> pd.Timestamp:
+        ...
+
+    @abstractmethod
+    def step(self, delta: pd.Timedelta) -> None:
         ...
 
     def __enter__(self) -> Clock:
@@ -106,6 +110,10 @@ class RealClock(Clock):
 
     def _time(self) -> pd.Timestamp:
         return pd.Timestamp.now()
+
+    def step(self, delta: pd.Timedelta) -> None:
+        _ = delta
+        raise RuntimeError('cannot step a real clock')
 
 
 class VirutalClock(Clock):

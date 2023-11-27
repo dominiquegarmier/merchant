@@ -3,8 +3,10 @@ from __future__ import annotations
 from abc import ABCMeta
 from abc import abstractmethod
 
+from merchant.environment.base.env import TradingEnvAbstract
 
-class Stepper(metaclass=ABCMeta):
+
+class BaseStepper(metaclass=ABCMeta):
     @abstractmethod
-    def step(self) -> bool:
+    def __call__(self, env: TradingEnvAbstract) -> None:
         raise NotImplementedError
